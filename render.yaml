@@ -1,0 +1,19 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# שורש הריפו חייב להכיל monitor.html + package.json + תיקיית backend (לא לבחור Root Directory = backend)
+#
+# פריסה מהירה (אחרי git push ל-GitHub):
+# 1) render.com — Sign up — Connect GitHub
+# 2) New — Blueprint — בחר ריפו — Deploy
+# 3) בסוף: כתובת https://war-monitor.onrender.com (או דומה) — פותחים מהטלפון
+# 4) Environment: העתק משתנים מ-.env.example לפי הצורך (ללא העלאת .env לגיט)
+services:
+  - type: web
+    name: war-monitor
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: TZOFAR_BACKUP_ENABLED
+        value: "1"

@@ -1,0 +1,23 @@
+---
+description: Iron rule - never modify the website design or styling
+alwaysApply: true
+---
+
+# Do NOT Modify Website Design
+
+This is an absolute iron rule that must never be broken:
+
+- **NEVER** change any CSS, styling, colors, fonts, layout, spacing, sizes, or any visual design element
+- **NEVER** modify class names or IDs that affect styling
+- **NEVER** remove or alter inline styles
+- **NEVER** change HTML structure in a way that affects the visual layout
+- **NEVER** modify any design-related files (CSS, SCSS, LESS, styled-components, Tailwind classes, etc.)
+- **NEVER** change image assets, icons, or any visual media
+
+When making any code changes, ensure:
+1. All existing CSS/styling remains completely untouched
+2. All existing class names and IDs stay the same
+3. All visual layout and structure is preserved exactly as-is
+4. If functionality changes are needed, implement them without altering any design aspects
+
+If a requested change would require design modifications, explicitly inform the user and ask for permission before proceeding.

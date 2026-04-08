@@ -1,0 +1,22 @@
+node_modules/
+backend/node_modules/
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# local runtime - not for git
+_dash_tmp.json
+server_8080.err
+server_8080.out
+server.err.log
+server.out.log
+_tmp_err.log
+_tmp_out.log
+blobs/
+manifests/
+data/chat-history.json
+data/client-event-feed.json
+data/news-articles.json
+data/osint-impact-registry.json
+

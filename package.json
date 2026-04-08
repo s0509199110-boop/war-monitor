@@ -1,0 +1,31 @@
+{
+  "name": "war-monitor-integrated-server",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Unified single-site server for monitor.html with live Pikud HaOref integration",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js",
+    "verify": "node --check backend/server.js && node --check backend/launchAxisAiEngine.js && node scripts/verify-war-monitor.mjs && node scripts/test-threat-axis.mjs && node scripts/test-launch-axis-ai.mjs",
+    "test:axis": "node scripts/test-threat-axis.mjs",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:cluster": "node scripts/cluster-munition-simulation.mjs",
+    "test:all": "npm run verify && cd backend && npm run sim:harness && cd .. && npm run test:browser"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.4",
+    "ws": "^8.16.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "playwright": "^1.49.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

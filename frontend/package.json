@@ -1,0 +1,25 @@
+{
+  "name": "war-monitor-frontend",
+  "version": "4.0.0",
+  "description": "War Monitor - Unified Frontend (React + Vite)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-map-gl": "^7.1.0",
+    "mapbox-gl": "^3.0.0",
+    "deck.gl": "^8.9.0",
+    "socket.io-client": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "vite": "^5.0.0"
+  }
+}
