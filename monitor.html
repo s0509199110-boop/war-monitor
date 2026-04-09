@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>מוניטור מלחמה</title>
 <!-- כשהאתר סטטי (Netlify): הזן כאן כתובת HTTPS של שרת Node (Render/Railway/VPS) ללא סלאש בסוף -->
 <meta name="war-monitor-api" content="">
@@ -815,6 +815,122 @@ header { background: var(--bg2); border-bottom: 1px solid var(--border); padding
 .wm-backend-btn.ghost { font-size: 11px; opacity: 0.88; }
 .wm-backend-banner-hint { margin-top: 8px; font-size: 10px; color: var(--text3); }
 .wm-backend-banner-hint code { color: var(--text2); font-size: 10px; }
+
+/* מובייל / מסך צר — בלי לשנות את הפריסה מעל 900px */
+@media (max-width: 900px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-left: max(0px, env(safe-area-inset-left, 0px));
+    padding-right: max(0px, env(safe-area-inset-right, 0px));
+  }
+  header {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 52px;
+    padding: 8px 12px;
+    row-gap: 6px;
+  }
+  .logo-text { font-size: 16px; letter-spacing: 1px; }
+  .header-clock { font-size: 11px; }
+  .nav-btn { padding: 6px 10px; font-size: 11px; }
+  .main {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    grid-template-columns: unset;
+    grid-template-rows: unset;
+  }
+  .metrics-bar {
+    grid-column: unset;
+    order: 1;
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric-card {
+    border-left: none;
+    border-bottom: 1px solid var(--border2);
+    padding: 8px 10px;
+  }
+  .metric-value { font-size: 16px; }
+  .map-container {
+    order: 2;
+    width: 100%;
+    min-height: 240px;
+    height: 42vh;
+    height: 42dvh;
+    max-height: 480px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  #map {
+    min-height: 220px;
+  }
+  .left-panel {
+    order: 3;
+    width: 100%;
+    min-height: 0;
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid var(--border2);
+    flex: 0 1 auto;
+  }
+  .right-panel {
+    order: 4;
+    width: 100%;
+    min-height: 0;
+    border-right: none;
+    border-top: 1px solid var(--border2);
+    flex: 0 1 auto;
+  }
+  .bottom-bar {
+    grid-column: unset;
+    order: 5;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+  }
+  .event-feed-wrap {
+    max-height: min(52vh, 420px);
+  }
+  .left-map-stack {
+    width: min(168px, 46vw);
+    max-height: calc(42dvh - 20px);
+    top: 4px;
+    left: 4px;
+    gap: 4px;
+  }
+  .layer-panel {
+    top: 52px;
+    right: 6px;
+    min-width: 118px;
+    padding: 6px;
+  }
+  .layer-item { font-size: 9px; padding: 5px 0; }
+  .live-status {
+    top: 6px;
+    right: 6px;
+    left: 6px;
+    max-width: none;
+    padding: 8px 10px;
+  }
+  .live-status-title { font-size: 12px; }
+  .time-machine { padding: 8px 10px; }
+  .timeline-controls { flex-wrap: wrap; gap: 6px; }
+  .tm-btn { padding: 6px 8px; font-size: 10px; }
+  .map-controls { bottom: 10px; right: 6px; }
+  .country-threat-grid { grid-template-columns: 1fr; }
+  .source-health-grid { grid-template-columns: 1fr; }
+  .bb-widget-quad .bb-quad-col { flex: 1 1 100%; min-height: 100px; }
+}
 </style>
 </head>
 <body>
@@ -2100,6 +2216,22 @@ function initMap() {
   L.control.zoom({ position: 'bottomright' }).addTo(s.map);
   s.map.on('zoomend', scheduleHebrewGeoLabelsRender);
   s.map.on('moveend', scheduleHebrewGeoLabelsRender);
+  var _wmMapResizeTimer = null;
+  function wmInvalidateMapSize() {
+    if (!s.map || typeof s.map.invalidateSize !== 'function') return;
+    try {
+      s.map.invalidateSize({ animate: false });
+    } catch (eWmInv) {}
+    scheduleHebrewGeoLabelsRender();
+  }
+  window.addEventListener('resize', function () {
+    if (_wmMapResizeTimer) clearTimeout(_wmMapResizeTimer);
+    _wmMapResizeTimer = setTimeout(wmInvalidateMapSize, 120);
+  });
+  window.addEventListener('orientationchange', function () {
+    setTimeout(wmInvalidateMapSize, 280);
+  });
+  setTimeout(wmInvalidateMapSize, 450);
 }
 function initClock() { setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString('he-IL'); }, 1000); }
 function scheduleHebrewGeoLabelsRender() {
