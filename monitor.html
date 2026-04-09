@@ -3347,8 +3347,10 @@ function initLiveChat(socket) {
   });
 
   socket.on('chat_history', function (rows) {
-    messagesEl.innerHTML = '';
     if (!Array.isArray(rows)) return;
+    /* ריק מהשרת = אל תמחק תצוגה שכבר נטענה ממטמון מקומי / הודעות חיות */
+    if (rows.length === 0) return;
+    messagesEl.innerHTML = '';
     rows.forEach(function (m) {
       appendChatLine(m, messagesEl, { scroll: false });
     });
@@ -3385,6 +3387,29 @@ function initLiveChat(socket) {
       showComposer(s2.slice(0, 24));
     }
   }
+
+  /* גיבוי: אם chat_history בסוקט לא הגיע או אבד, טוענים מאותו מקור מהשרת ב-HTTP */
+  setTimeout(function tryHydrateChatFromHttp() {
+    try {
+      if (!messagesEl || messagesEl.querySelectorAll('.chat-line[data-chat-id]').length > 0) return;
+      var base = getMonitorApiBase();
+      if (!base || String(base).indexOf('file:') === 0) return;
+      fetch(base + '/api/chat/history', { credentials: 'omit', cache: 'no-store' })
+        .then(function (r) {
+          return r.ok ? r.json() : null;
+        })
+        .then(function (data) {
+          var rows = data && data.messages;
+          if (!Array.isArray(rows) || rows.length === 0) return;
+          rows.forEach(function (m) {
+            appendChatLine(m, messagesEl, { scroll: false });
+          });
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+          saveChatLogCache(rows);
+        })
+        .catch(function () {});
+    } catch (eH) {}
+  }, 900);
 }
 function addAlert(data) {
   if (timeMachine && typeof timeMachine.isLiveMode === 'function' && !timeMachine.isLiveMode() && !data.__fromTimeMachine) {

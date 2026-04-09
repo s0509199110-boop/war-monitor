@@ -6455,7 +6455,6 @@ const CHAT_HISTORY_SEND = 200;
 const CHAT_HISTORY_FILE = path.join(ROOT_DIR, 'data', 'chat-history.json');
 const chatHistory = [];
 const chatMsgBurst = new Map();
-let chatHistorySaveTimer = null;
 
 function savePersistedChatHistorySync() {
   try {
@@ -6467,19 +6466,7 @@ function savePersistedChatHistorySync() {
   }
 }
 
-function schedulePersistChatHistory() {
-  if (chatHistorySaveTimer) clearTimeout(chatHistorySaveTimer);
-  chatHistorySaveTimer = setTimeout(() => {
-    chatHistorySaveTimer = null;
-    savePersistedChatHistorySync();
-  }, 400);
-}
-
 function flushPersistChatHistorySync() {
-  if (chatHistorySaveTimer) {
-    clearTimeout(chatHistorySaveTimer);
-    chatHistorySaveTimer = null;
-  }
   savePersistedChatHistorySync();
 }
 
@@ -6528,7 +6515,8 @@ function loadPersistedChatHistory() {
 function pushChatMessage(entry) {
   chatHistory.push(entry);
   if (chatHistory.length > CHAT_HISTORY_MAX) chatHistory.splice(0, chatHistory.length - CHAT_HISTORY_MAX);
-  schedulePersistChatHistory();
+  /* שמירה מיידית לדיסק — השהייה של 400ms גרמה לאיבוד ההודעה האחרונה בכיבוי/פריסה מהירה (Render וכו׳) */
+  flushPersistChatHistorySync();
 }
 
 loadPersistedChatHistory();
@@ -6641,6 +6629,20 @@ app.get('/health', (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ ok: false, status: 'error', error: 'health_failed' });
     }
+  }
+});
+
+/** היסטוריית צ׳אט לקריאה ב-HTTP (גיבוי אם chat_history בסוקט התפספס; אותו מקור כמו בזיכרון/קובץ) */
+app.get('/api/chat/history', (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      ok: true,
+      messages: chatHistory.slice(-CHAT_HISTORY_SEND),
+      total: chatHistory.length,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'chat_history_failed' });
   }
 });
 
