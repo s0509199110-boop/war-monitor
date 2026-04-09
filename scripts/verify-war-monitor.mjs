@@ -233,7 +233,19 @@ async function liveChecks(base) {
     fail('/api/dashboard ok=false');
     return false;
   }
-  const need = ['activeMissiles', 'activeAlerts', 'flights', 'markets', 'eventFeed', 'oref', 'osint'];
+  const need = [
+    'activeMissiles',
+    'activeAlerts',
+    'flights',
+    'markets',
+    'eventFeed',
+    'oref',
+    'osint',
+    'ships',
+    'fires',
+    'seismic',
+    'osintImpacts',
+  ];
   for (const k of need) {
     if (!(k in j)) {
       fail(`/api/dashboard חסר שדה: ${k}`);
@@ -252,7 +264,25 @@ async function liveChecks(base) {
     fail('/api/dashboard.flights חייב להיות מערך');
     return false;
   }
-  ok('/api/dashboard תקין (activeMissiles, markets, flights, oref, feeds)');
+  if (!Array.isArray(j.ships)) {
+    fail('/api/dashboard.ships חייב להיות מערך');
+    return false;
+  }
+  if (!Array.isArray(j.fires)) {
+    fail('/api/dashboard.fires חייב להיות מערך');
+    return false;
+  }
+  if (!Array.isArray(j.seismic)) {
+    fail('/api/dashboard.seismic חייב להיות מערך');
+    return false;
+  }
+  if (!Array.isArray(j.osintImpacts)) {
+    fail('/api/dashboard.osintImpacts חייב להיות מערך');
+    return false;
+  }
+  ok(
+    `/api/dashboard תקין (כולל ships=${j.ships.length}, fires=${j.fires.length}, seismic=${j.seismic.length})`
+  );
 
   r = await httpGet(homeUrl);
   if (r.status !== 200) {

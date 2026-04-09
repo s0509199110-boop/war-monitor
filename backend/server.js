@@ -5729,164 +5729,223 @@ function parseMyShipTrackingLine(line) {
   };
 }
 
+function parseMyShipTrackingTextToShips(txt) {
+  const ships = [];
+  const lines = String(txt || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    const row = parseMyShipTrackingLine(line);
+    if (row) ships.push(row);
+  }
+  return ships.slice(0, 200);
+}
+
+function buildMyShipBuiltinPublicUrl(bbox) {
+  const minLat = bbox ? bbox.minLat : envNumOr('SHIP_PUBLIC_MIN_LAT', 29);
+  const maxLat = bbox ? bbox.maxLat : envNumOr('SHIP_PUBLIC_MAX_LAT', 34.5);
+  const minLng = bbox ? bbox.minLng : envNumOr('SHIP_PUBLIC_MIN_LNG', 32);
+  const maxLng = bbox ? bbox.maxLng : envNumOr('SHIP_PUBLIC_MAX_LNG', 36.5);
+  const zoom = bbox ? bbox.zoom : Math.max(5, Math.min(12, envNumOr('SHIP_PUBLIC_ZOOM', 7)));
+  return `https://www.myshiptracking.com/requests/vesselsonmaptempTTT.php?type=json&minlat=${encodeURIComponent(
+    minLat
+  )}&maxlat=${encodeURIComponent(maxLat)}&minlon=${encodeURIComponent(minLng)}&maxlon=${encodeURIComponent(
+    maxLng
+  )}&zoom=${encodeURIComponent(zoom)}`;
+}
+
+/** בקשה ל־MyShipTracking — fullUrl מלא (מותאם אישית או buildMyShipBuiltinPublicUrl) */
+async function fetchMyShipPublicShipsFromUrl(fullUrl) {
+  const publicUrl = String(fullUrl || '').trim();
+  if (!publicUrl) return [];
+  const publicResp = await axios.get(publicUrl, {
+    timeout: Number(process.env.SHIP_PUBLIC_TIMEOUT_MS || 16000),
+    headers: {
+      Accept: 'application/json,text/plain,*/*',
+      Referer: 'https://www.myshiptracking.com/',
+      Origin: 'https://www.myshiptracking.com',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    },
+    responseType: 'text',
+    maxRedirects: 5,
+  });
+  const raw = String(publicResp.data || '');
+  const ships = parseMyShipTrackingTextToShips(raw);
+  if (ships.length === 0 && raw.length > 0 && /[<>]|html/i.test(raw.slice(0, 80))) {
+    console.warn('[AIS public] Response looks like HTML (blocked or error page), length=', raw.length);
+  }
+  return ships;
+}
+
+/** כל נסיונות הגיבוי הציבורי: SHIP_PUBLIC_URL, ברירת מחדל (בלי כפילות), תיבה רחבה, SHIP_FALLBACK_URLS */
+async function fetchPublicShipsFallbackChain() {
+  const attempts = [];
+  const custom = String(process.env.SHIP_PUBLIC_URL || '').trim();
+  const defaultBuiltin = buildMyShipBuiltinPublicUrl(null);
+  const wideBuiltin = buildMyShipBuiltinPublicUrl({
+    minLat: 28,
+    maxLat: 36,
+    minLng: 29,
+    maxLng: 38,
+    zoom: 6,
+  });
+  if (custom) attempts.push(() => fetchMyShipPublicShipsFromUrl(custom));
+  if (!custom || custom !== defaultBuiltin) attempts.push(() => fetchMyShipPublicShipsFromUrl(defaultBuiltin));
+  if (wideBuiltin !== defaultBuiltin && wideBuiltin !== custom) {
+    attempts.push(() => fetchMyShipPublicShipsFromUrl(wideBuiltin));
+  }
+  const extras = String(process.env.SHIP_FALLBACK_URLS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const u of extras) {
+    if (u && u !== custom && u !== defaultBuiltin && u !== wideBuiltin) {
+      attempts.push(() => fetchMyShipPublicShipsFromUrl(u));
+    }
+  }
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      const ships = await attempts[i]();
+      if (ships.length > 0) return ships;
+    } catch (e) {
+      console.warn('[AIS public] attempt', i + 1, ':', e.response?.status || e.message);
+    }
+  }
+  return [];
+}
+
+function mapGenericAisShips(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  return rawList
+    .map((ship, index) => ({
+      lat: Number(ship.lat ?? ship.latitude),
+      lng: Number(ship.lng ?? ship.longitude),
+      name: ship.name || ship.vessel_name || ship.SHIPNAME || ship.vesselName || `Vessel ${index + 1}`,
+      type: ship.type || ship.category || ship.vesselType || 'Unknown',
+      speed: Number(ship.speed ?? ship.sog ?? ship.SOG ?? 0),
+      course: Number(ship.course ?? ship.cog ?? ship.COG ?? 0),
+      mmsi: String(ship.mmsi ?? ship.MMSI ?? ''),
+    }))
+    .filter((ship) => Number.isFinite(ship.lat) && Number.isFinite(ship.lng))
+    .slice(0, 200);
+}
+
 async function fetchShipTracking() {
   try {
     if (process.env.VESSELAPI_KEY) {
-      const vesselApiResponse = await axios.get(
-        'https://api.vesselapi.com/v1/vessels/positions?filters.latMin=10&filters.latMax=45&filters.lngMin=20&filters.lngMax=70&pagination.limit=50',
-        {
-          timeout: 10000,
-          headers: {
-            Authorization: `Bearer ${process.env.VESSELAPI_KEY}`,
-            'User-Agent': 'Mozilla/5.0',
-          },
+      try {
+        const vesselApiResponse = await axios.get(
+          'https://api.vesselapi.com/v1/vessels/positions?filters.latMin=10&filters.latMax=45&filters.lngMin=20&filters.lngMax=70&pagination.limit=50',
+          {
+            timeout: 10000,
+            headers: {
+              Authorization: `Bearer ${process.env.VESSELAPI_KEY}`,
+              'User-Agent': 'Mozilla/5.0',
+            },
+          }
+        );
+        const vesselApiShips = Array.isArray(vesselApiResponse.data?.vesselPositions)
+          ? vesselApiResponse.data.vesselPositions
+          : [];
+        if (vesselApiShips.length > 0) {
+          return mapGenericAisShips(vesselApiShips);
         }
-      );
-
-      const vesselApiShips = Array.isArray(vesselApiResponse.data?.vesselPositions)
-        ? vesselApiResponse.data.vesselPositions
-        : [];
-
-      if (vesselApiShips.length > 0) {
-        return vesselApiShips
-          .map((ship, index) => ({
-            lat: Number(ship.lat ?? ship.latitude),
-            lng: Number(ship.lng ?? ship.longitude),
-            name: ship.name || ship.vesselName || `Vessel ${index + 1}`,
-            type: ship.type || ship.vesselType || 'Unknown',
-            speed: Number(ship.speed ?? ship.sog ?? 0),
-            course: Number(ship.course ?? ship.cog ?? 0),
-            mmsi: ship.mmsi || '',
-          }))
-          .filter((ship) => Number.isFinite(ship.lat) && Number.isFinite(ship.lng));
+      } catch (eV) {
+        console.warn('[AIS] VesselAPI failed, trying next provider:', eV.response?.status || eV.message);
       }
     }
 
     if (process.env.MARINETRAFFIC_API_KEY) {
-      const mtMinLat = envNumOr('MARINE_MIN_LAT', 10);
-      const mtMaxLat = envNumOr('MARINE_MAX_LAT', 45);
-      const mtMinLng = envNumOr('MARINE_MIN_LNG', 20);
-      const mtMaxLng = envNumOr('MARINE_MAX_LNG', 70);
-      const mtTimespan = Math.max(5, envNumOr('MARINE_TIMESPAN_MIN', 20));
-      const mtProtocol = process.env.MARINE_PROTOCOL || 'jsono';
-      const mtUrl =
-        process.env.MARINETRAFFIC_URL ||
-        `https://services.marinetraffic.com/api/exportvessel/v:8/${encodeURIComponent(
-          process.env.MARINETRAFFIC_API_KEY
-        )}/timespan:${mtTimespan}/protocol:${encodeURIComponent(mtProtocol)}/minlat:${mtMinLat}/maxlat:${mtMaxLat}/minlon:${mtMinLng}/maxlon:${mtMaxLng}`;
-
-      const mtResponse = await axios.get(mtUrl, {
-        timeout: Number(process.env.MARINE_TIMEOUT_MS || 10000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-        },
-      });
-      const mtShips = Array.isArray(mtResponse.data)
-        ? mtResponse.data
-        : Array.isArray(mtResponse.data?.data)
-        ? mtResponse.data.data
-        : [];
-      if (mtShips.length > 0) {
-        return mtShips
-          .map((ship, index) => ({
-            lat: Number(
-              ship.LAT ?? ship.LATITUDE ?? ship.lat ?? ship.latitude ?? ship.y
-            ),
-            lng: Number(
-              ship.LON ?? ship.LONGITUDE ?? ship.lon ?? ship.lng ?? ship.longitude ?? ship.x
-            ),
-            name:
-              ship.SHIPNAME ||
-              ship.SHIP_NAME ||
-              ship.NAME ||
-              ship.name ||
-              `Vessel ${index + 1}`,
-            type: ship.SHIPTYPE || ship.TYPE_NAME || ship.type || 'Unknown',
-            speed: Number(ship.SPEED ?? ship.SOG ?? ship.speed ?? ship.sog ?? 0),
-            course: Number(ship.COURSE ?? ship.COG ?? ship.course ?? ship.cog ?? 0),
-            mmsi: ship.MMSI || ship.mmsi || '',
-          }))
-          .filter((ship) => Number.isFinite(ship.lat) && Number.isFinite(ship.lng))
-          .slice(0, 200);
-      }
-    }
-
-    const apiUrl = process.env.AIS_API_URL;
-    if (!apiUrl) {
-      // Fallback ציבורי ללא מפתח: MyShipTracking map feed (טקסט-TSV).
-      const minLat = envNumOr('SHIP_PUBLIC_MIN_LAT', 29);
-      const maxLat = envNumOr('SHIP_PUBLIC_MAX_LAT', 34.5);
-      const minLng = envNumOr('SHIP_PUBLIC_MIN_LNG', 32);
-      const maxLng = envNumOr('SHIP_PUBLIC_MAX_LNG', 36.5);
-      const zoom = Math.max(5, Math.min(12, envNumOr('SHIP_PUBLIC_ZOOM', 7)));
-      const publicUrl =
-        process.env.SHIP_PUBLIC_URL ||
-        `https://www.myshiptracking.com/requests/vesselsonmaptempTTT.php?type=json&minlat=${encodeURIComponent(
-          minLat
-        )}&maxlat=${encodeURIComponent(maxLat)}&minlon=${encodeURIComponent(minLng)}&maxlon=${encodeURIComponent(
-          maxLng
-        )}&zoom=${encodeURIComponent(zoom)}`;
       try {
-        const publicResp = await axios.get(publicUrl, {
-          timeout: Number(process.env.SHIP_PUBLIC_TIMEOUT_MS || 10000),
-          headers: {
-            Accept: 'application/json,text/plain,*/*',
-            Referer: 'https://www.myshiptracking.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-          responseType: 'text',
-        });
-        const txt = String(publicResp.data || '');
-        const lines = txt
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const ships = [];
-        for (const line of lines) {
-          const row = parseMyShipTrackingLine(line);
-          if (row) ships.push(row);
-        }
-        if (ships.length > 0) {
-          return ships.slice(0, 200);
-        }
-      } catch (publicErr) {
-        console.log('[AIS public] Error:', publicErr.response?.status || publicErr.message);
-      }
+        const mtMinLat = envNumOr('MARINE_MIN_LAT', 10);
+        const mtMaxLat = envNumOr('MARINE_MAX_LAT', 45);
+        const mtMinLng = envNumOr('MARINE_MIN_LNG', 20);
+        const mtMaxLng = envNumOr('MARINE_MAX_LNG', 70);
+        const mtTimespan = Math.max(5, envNumOr('MARINE_TIMESPAN_MIN', 20));
+        const mtProtocol = process.env.MARINE_PROTOCOL || 'jsono';
+        const mtUrl =
+          process.env.MARINETRAFFIC_URL ||
+          `https://services.marinetraffic.com/api/exportvessel/v:8/${encodeURIComponent(
+            process.env.MARINETRAFFIC_API_KEY
+          )}/timespan:${mtTimespan}/protocol:${encodeURIComponent(mtProtocol)}/minlat:${mtMinLat}/maxlat:${mtMaxLat}/minlon:${mtMinLng}/maxlon:${mtMaxLng}`;
 
-      if (!Array.isArray(state.ships) || state.ships.length === 0) {
-        console.log(
-          '[AIS] No provider configured. Using public fallback failed. Set VESSELAPI_KEY, MARINETRAFFIC_API_KEY, AIS_API_URL or SHIP_PUBLIC_URL'
-        );
+        const mtResponse = await axios.get(mtUrl, {
+          timeout: Number(process.env.MARINE_TIMEOUT_MS || 10000),
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        });
+        const mtShips = Array.isArray(mtResponse.data)
+          ? mtResponse.data
+          : Array.isArray(mtResponse.data?.data)
+          ? mtResponse.data.data
+          : [];
+        if (mtShips.length > 0) {
+          return mtShips
+            .map((ship, index) => ({
+              lat: Number(
+                ship.LAT ?? ship.LATITUDE ?? ship.lat ?? ship.latitude ?? ship.y
+              ),
+              lng: Number(
+                ship.LON ?? ship.LONGITUDE ?? ship.lon ?? ship.lng ?? ship.longitude ?? ship.x
+              ),
+              name:
+                ship.SHIPNAME ||
+                ship.SHIP_NAME ||
+                ship.NAME ||
+                ship.name ||
+                `Vessel ${index + 1}`,
+              type: ship.SHIPTYPE || ship.TYPE_NAME || ship.type || 'Unknown',
+              speed: Number(ship.SPEED ?? ship.SOG ?? ship.speed ?? ship.sog ?? 0),
+              course: Number(ship.COURSE ?? ship.COG ?? ship.course ?? ship.cog ?? 0),
+              mmsi: ship.MMSI || ship.mmsi || '',
+            }))
+            .filter((ship) => Number.isFinite(ship.lat) && Number.isFinite(ship.lng))
+            .slice(0, 200);
+        }
+      } catch (eM) {
+        console.warn('[AIS] MarineTraffic failed, trying next:', eM.response?.status || eM.message);
       }
-      return state.ships;
     }
 
-    const response = await axios.get(apiUrl, {
-      timeout: 10000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-      },
-    });
+    const apiUrl = String(process.env.AIS_API_URL || '').trim();
+    if (apiUrl) {
+      try {
+        const response = await axios.get(apiUrl, {
+          timeout: 10000,
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        });
+        const ships = Array.isArray(response.data)
+          ? response.data
+          : Array.isArray(response.data?.ships)
+          ? response.data.ships
+          : [];
+        const mapped = mapGenericAisShips(ships);
+        if (mapped.length > 0) return mapped;
+        console.warn('[AIS] AIS_API_URL returned no vessels, falling back to public AIS');
+      } catch (eA) {
+        console.warn('[AIS] AIS_API_URL failed, falling back to public:', eA.response?.status || eA.message);
+      }
+    }
 
-    const ships = Array.isArray(response.data)
-      ? response.data
-      : Array.isArray(response.data?.ships)
-      ? response.data.ships
-      : [];
+    const publicShips = await fetchPublicShipsFallbackChain();
+    if (publicShips.length > 0) {
+      console.log(`[AIS] Public fallback: ${publicShips.length} vessel(s)`);
+      return publicShips;
+    }
 
-    return ships
-      .map((ship, index) => ({
-        lat: Number(ship.lat ?? ship.latitude),
-        lng: Number(ship.lng ?? ship.longitude),
-        name: ship.name || ship.vessel_name || `Vessel ${index + 1}`,
-        type: ship.type || ship.category || 'Unknown',
-        speed: Number(ship.speed ?? ship.sog ?? 0),
-        course: Number(ship.course ?? ship.cog ?? 0),
-        mmsi: ship.mmsi || '',
-      }))
-      .filter((ship) => Number.isFinite(ship.lat) && Number.isFinite(ship.lng));
+    if (!Array.isArray(state.ships) || state.ships.length === 0) {
+      console.log(
+        '[AIS] All providers empty or failed. Optional: VESSELAPI_KEY, MARINETRAFFIC_API_KEY, AIS_API_URL, SHIP_PUBLIC_URL, SHIP_FALLBACK_URLS'
+      );
+    }
+    return state.ships;
   } catch (error) {
-    console.log('[AIS] Error:', error.message);
+    console.warn('[AIS] Unexpected error:', error.message);
+    try {
+      const last = await fetchPublicShipsFallbackChain();
+      if (last.length > 0) return last;
+    } catch (_) {}
     return state.ships;
   }
 }

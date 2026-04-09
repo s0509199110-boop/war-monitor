@@ -122,6 +122,34 @@ async function runPlaywright(base) {
       return false;
     }
 
+    const dashCheck = await page.evaluate(async () => {
+      try {
+        const r = await fetch('/api/dashboard', { cache: 'no-store' });
+        if (!r.ok) return { ok: false, err: 'dashboard status ' + r.status };
+        const j = await r.json();
+        if (!j || j.ok !== true) return { ok: false, err: 'dashboard ok=false' };
+        const arrKeys = ['ships', 'fires', 'flights', 'seismic', 'activeMissiles', 'osintImpacts'];
+        for (let i = 0; i < arrKeys.length; i++) {
+          const k = arrKeys[i];
+          if (!Array.isArray(j[k])) return { ok: false, err: 'dashboard.' + k + ' not array' };
+        }
+        return { ok: true, ships: j.ships.length, fires: j.fires.length };
+      } catch (e) {
+        return { ok: false, err: String(e && e.message ? e.message : e) };
+      }
+    });
+    if (!dashCheck.ok) {
+      console.error('FAIL: /api/dashboard:', dashCheck.err);
+      return false;
+    }
+    console.log(
+      'OK  /api/dashboard: מערכים תקינים (ships:',
+      dashCheck.ships,
+      'fires:',
+      dashCheck.fires,
+      ')'
+    );
+
     if (pageErrors.length > 0) {
       console.error('FAIL: שגיאות עמוד:', pageErrors.slice(0, 5));
       return false;
