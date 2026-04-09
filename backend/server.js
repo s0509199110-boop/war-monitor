@@ -5173,32 +5173,186 @@ async function pollOrefMissileLayer() {
   }
 }
 
+function flightInMiddleEastBox(flight) {
+  return (
+    flight &&
+    flight.latitude != null &&
+    flight.longitude != null &&
+    flight.latitude >= 28 &&
+    flight.latitude <= 37 &&
+    flight.longitude >= 32 &&
+    flight.longitude <= 42
+  );
+}
+
+/** מפתח לאיחוד רשומות מ-OpenSky ו-ADSB */
+function flightDedupeKey(f) {
+  const h = String(f?.icao24 || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^~/, '');
+  if (h && h.length >= 4) return `h:${h}`;
+  const lat = Number(f?.latitude);
+  const lng = Number(f?.longitude);
+  const cs = String(f?.callsign || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '');
+  if (Number.isFinite(lat) && Number.isFinite(lng) && cs && cs !== 'N/A') {
+    return `p:${Math.round(lat * 40) / 40}_${Math.round(lng * 40) / 40}_${cs.slice(0, 10)}`;
+  }
+  return `u:${cs || 'na'}_${lat}_${lng}`;
+}
+
+/** אל על — קוד ICAO ELY (למשל ELY027), לעיתים ELAL בטקסט */
+function isElAlCallsign(f) {
+  const raw = String(f?.callsign || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '');
+  if (!raw || raw === 'N/A') return false;
+  if (raw.startsWith('ELY') && raw.length >= 5) return true;
+  if (raw.startsWith('ELAL')) return true;
+  return false;
+}
+
+function mergeFlightArrays(openSkyList, adsbList) {
+  const map = new Map();
+  for (const f of openSkyList) {
+    const row = {
+      ...f,
+      dataSources: ['OpenSky'],
+      isElAl: isElAlCallsign(f),
+    };
+    map.set(flightDedupeKey(row), row);
+  }
+  for (const f of adsbList) {
+    const key = flightDedupeKey(f);
+    if (!map.has(key)) {
+      map.set(key, {
+        ...f,
+        dataSources: ['ADS-B'],
+        isElAl: isElAlCallsign(f),
+      });
+    } else {
+      const ex = map.get(key);
+      if (!ex.dataSources.includes('ADS-B')) ex.dataSources.push('ADS-B');
+      ex.isElAl = Boolean(ex.isElAl) || isElAlCallsign(f);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function sortFlightsForUi(list) {
+  return [...list].sort((a, b) => {
+    const ae = a.isElAl ? 1 : 0;
+    const be = b.isElAl ? 1 : 0;
+    if (be !== ae) return be - ae;
+    return (Number(b.baro_altitude) || 0) - (Number(a.baro_altitude) || 0);
+  });
+}
+
+/** מספר נקודות adsb.one (וגם ADSB_EXCHANGE_URLS) — משלים OpenSky ומדגיש כיסוי לישראל / אל על */
+async function fetchAdsbMultiPointFlights() {
+  const extra = String(process.env.ADSB_EXCHANGE_URLS || '')
+    .split(',')
+    .map((s) => normalizeAdsbUrl(s.trim()))
+    .filter(Boolean);
+  const defaults = [
+    normalizeAdsbUrl(process.env.ADSB_EXCHANGE_URL),
+    'https://api.adsb.one/v2/point/32/35/500',
+    'https://api.adsb.one/v2/point/32.01/34.88/320',
+    'https://api.adsb.one/v2/point/31.25/35.0/380',
+    'https://api.adsb.one/v2/point/33.85/35.45/340',
+    'https://api.adsb.one/v2/point/29.55/34.95/450',
+  ].filter(Boolean);
+  const urls = [...new Set([...extra, ...defaults])];
+
+  const mapRow = (flight) => ({
+    icao24: flight.hex || flight.icao || '',
+    callsign: String(flight.flight || flight.callsign || flight.r || 'N/A').trim(),
+    origin_country: flight.country || '',
+    longitude: Number(flight.lon ?? flight.lng),
+    latitude: Number(flight.lat),
+    baro_altitude: Number(flight.alt_baro ?? flight.alt_geom ?? flight.alt ?? 0),
+    on_ground: Boolean(flight.ground),
+    velocity: Number(flight.gs ?? flight.speed ?? flight.tas ?? 0),
+    true_track: Number(flight.track ?? 0),
+    vertical_rate: Number(flight.baro_rate ?? flight.vertical ?? 0),
+  });
+
+  const byKey = new Map();
+  const reqOpts = {
+    timeout: Number(process.env.ADSB_TIMEOUT_MS || 8000),
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
+  };
+  const settled = await Promise.allSettled(urls.map((url) => axios.get(url, reqOpts)));
+  for (let i = 0; i < settled.length; i++) {
+    const res = settled[i];
+    if (res.status !== 'fulfilled') {
+      const msg = res.reason && res.reason.message ? res.reason.message : String(res.reason || '');
+      console.log('[ADSB multi]', String(urls[i]).slice(0, 72), msg);
+      continue;
+    }
+    try {
+      const response = res.value;
+      const aircraft = Array.isArray(response.data?.ac)
+        ? response.data.ac
+        : Array.isArray(response.data?.aircraft)
+        ? response.data.aircraft
+        : [];
+      for (const row of aircraft) {
+        const f = mapRow(row);
+        if (!Number.isFinite(f.latitude) || !Number.isFinite(f.longitude)) continue;
+        if (!flightInMiddleEastBox(f)) continue;
+        const key = flightDedupeKey(f);
+        if (!byKey.has(key)) byKey.set(key, f);
+      }
+    } catch (e) {
+      console.log('[ADSB multi] parse', String(urls[i]).slice(0, 72), e.message);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
 async function fetchOpenSkyData() {
+  const mapFlight = (flight) => ({
+    icao24: flight[0],
+    callsign: flight[1]?.trim() || 'N/A',
+    origin_country: flight[2],
+    longitude: flight[5],
+    latitude: flight[6],
+    baro_altitude: flight[7],
+    on_ground: flight[8],
+    velocity: flight[9],
+    true_track: flight[10],
+    vertical_rate: flight[11],
+  });
+
+  const mergeAndCap = async (openList) => {
+    const adsb = await fetchAdsbMultiPointFlights();
+    const merged = mergeFlightArrays(openList, adsb);
+    const sorted = sortFlightsForUi(merged);
+    const cap = Math.min(250, Math.max(100, Number(process.env.FLIGHTS_MERGED_MAX) || 200));
+    const out = sorted.slice(0, cap);
+    if (out.length > 0) {
+      const ely = out.filter((x) => x.isElAl).length;
+      console.log(
+        `[Flights] merged OpenSky+ADSB: ${out.length} (OpenSky ${openList.length}, ADSB uniq ${adsb.length}, אל על≈${ely})`
+      );
+    }
+    return out.length > 0 ? out : state.flights;
+  };
+
   try {
     if (Date.now() < openSkyRateLimitedUntil) {
-      return state.flights;
+      const adsbOnly = await fetchAdsbMultiPointFlights();
+      const cap = Math.min(250, Math.max(100, Number(process.env.FLIGHTS_MERGED_MAX) || 200));
+      const out = sortFlightsForUi(mergeFlightArrays([], adsbOnly)).slice(0, cap);
+      return out.length > 0 ? out : state.flights;
     }
-
-    const mapFlight = (flight) => ({
-      icao24: flight[0],
-      callsign: flight[1]?.trim() || 'N/A',
-      origin_country: flight[2],
-      longitude: flight[5],
-      latitude: flight[6],
-      baro_altitude: flight[7],
-      on_ground: flight[8],
-      velocity: flight[9],
-      true_track: flight[10],
-      vertical_rate: flight[11],
-    });
-
-    const inRegion = (flight) =>
-      flight.latitude &&
-      flight.longitude &&
-      flight.latitude >= 28 &&
-      flight.latitude <= 37 &&
-      flight.longitude >= 32 &&
-      flight.longitude <= 42;
 
     const params = {
       lamin: Number(process.env.OPENSKY_LAMIN || 28),
@@ -5217,11 +5371,11 @@ async function fetchOpenSkyData() {
       }
     );
 
-    let flights = (regionalResponse.data?.states || [])
+    let openFlights = (regionalResponse.data?.states || [])
       .map(mapFlight)
-      .filter(inRegion);
+      .filter(flightInMiddleEastBox);
 
-    if (flights.length === 0) {
+    if (openFlights.length === 0) {
       const globalResponse = await axios.get(
         process.env.OPENSKY_URL || 'https://opensky-network.org/api/states/all',
         {
@@ -5229,13 +5383,12 @@ async function fetchOpenSkyData() {
           timeout: Number(process.env.OPENSKY_TIMEOUT_MS || 12000),
         }
       );
-
-      flights = (globalResponse.data?.states || [])
+      openFlights = (globalResponse.data?.states || [])
         .map(mapFlight)
-        .filter(inRegion);
+        .filter(flightInMiddleEastBox);
     }
 
-    return flights.length > 0 ? flights.slice(0, 150) : state.flights;
+    return mergeAndCap(openFlights);
   } catch (error) {
     if (error.response?.status === 429) {
       const cooldownMs = Math.max(
@@ -5263,50 +5416,13 @@ function normalizeAdsbUrl(url) {
 }
 
 async function fetchAdsbExchangeData() {
-  const candidateUrls = [...new Set([
-    normalizeAdsbUrl(process.env.ADSB_EXCHANGE_URL),
-    'https://api.adsb.one/v2/point/32/35/500',
-  ].filter(Boolean))];
-
-  for (const candidateUrl of candidateUrls) {
-    try {
-      const response = await axios.get(candidateUrl, {
-        timeout: Number(process.env.ADSB_TIMEOUT_MS || 8000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      });
-
-      const aircraft = Array.isArray(response.data?.ac)
-        ? response.data.ac
-        : Array.isArray(response.data?.aircraft)
-        ? response.data.aircraft
-        : [];
-      const flights = aircraft
-        .map((flight) => ({
-          icao24: flight.hex || flight.icao || '',
-          callsign: String(flight.flight || flight.callsign || flight.r || 'N/A').trim(),
-          origin_country: flight.country || '',
-          longitude: Number(flight.lon ?? flight.lng),
-          latitude: Number(flight.lat),
-          baro_altitude: Number(flight.alt_baro ?? flight.alt_geom ?? flight.alt ?? 0),
-          on_ground: Boolean(flight.ground),
-          velocity: Number(flight.gs ?? flight.speed ?? flight.tas ?? 0),
-          true_track: Number(flight.track ?? 0),
-          vertical_rate: Number(flight.baro_rate ?? flight.vertical ?? 0),
-        }))
-        .filter((flight) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude))
-        .slice(0, 150);
-
-      if (flights.length > 0) {
-        console.log(`[ADSB] Fallback flights: ${flights.length}`);
-        return flights;
-      }
-    } catch (error) {
-      console.log('[ADSB] Error:', candidateUrl, error.response?.status || error.message);
-    }
+  const list = await fetchAdsbMultiPointFlights();
+  if (list.length > 0) {
+    const cap = Math.min(250, Math.max(100, Number(process.env.FLIGHTS_MERGED_MAX) || 200));
+    const merged = sortFlightsForUi(mergeFlightArrays([], list)).slice(0, cap);
+    console.log(`[ADSB] Fallback merged flights: ${merged.length}`);
+    return merged;
   }
-
   return fetchFlightRadar24Data();
 }
 
@@ -5354,21 +5470,26 @@ async function fetchFlightRadar24Data() {
             vertical: value[15],
           }));
 
-    const flights = aircraft
-      .map((flight) => ({
-        icao24: flight.hex || flight.icao || '',
-        callsign: String(flight.flight || flight.callsign || flight.r || 'N/A').trim(),
-        origin_country: flight.country || '',
-        longitude: Number(flight.lon ?? flight.lng),
-        latitude: Number(flight.lat),
-        baro_altitude: Number(flight.alt_baro ?? flight.alt_geom ?? flight.alt ?? 0),
-        on_ground: Boolean(flight.ground),
-        velocity: Number(flight.gs ?? flight.speed ?? flight.tas ?? 0),
-        true_track: Number(flight.track ?? 0),
-        vertical_rate: Number(flight.baro_rate ?? flight.vertical ?? 0),
-      }))
-      .filter((flight) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude))
-      .slice(0, 150);
+    const flights = sortFlightsForUi(
+      aircraft
+        .map((flight) => ({
+          icao24: flight.hex || flight.icao || '',
+          callsign: String(flight.flight || flight.callsign || flight.r || 'N/A').trim(),
+          origin_country: flight.country || '',
+          longitude: Number(flight.lon ?? flight.lng),
+          latitude: Number(flight.lat),
+          baro_altitude: Number(flight.alt_baro ?? flight.alt_geom ?? flight.alt ?? 0),
+          on_ground: Boolean(flight.ground),
+          velocity: Number(flight.gs ?? flight.speed ?? flight.tas ?? 0),
+          true_track: Number(flight.track ?? 0),
+          vertical_rate: Number(flight.baro_rate ?? flight.vertical ?? 0),
+          dataSources: ['FR24'],
+          isElAl: isElAlCallsign({
+            callsign: String(flight.flight || flight.callsign || flight.r || ''),
+          }),
+        }))
+        .filter((flight) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude))
+    ).slice(0, 200);
 
     if (flights.length > 0) {
       console.log(`[FR24] Fallback flights: ${flights.length}`);

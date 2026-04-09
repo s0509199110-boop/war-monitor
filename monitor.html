@@ -3587,19 +3587,45 @@ function updateFlights(data) {
       var lng = Number(f && f.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       var m = L.circleMarker([lat, lng], { radius: 4, fillColor: '#00d4ff', color: '#fff', weight: 1, fillOpacity: 0.8 }).addTo(s.layers.flights);
-      m.bindPopup('<b>' + (f.callsign || 'N/A') + '</b><br>גובה: ' + flightAltDisplayFt(f));
+      var popSrc = Array.isArray(f.dataSources) && f.dataSources.length ? f.dataSources.join(' + ') : '';
+      var popElAl = f.isElAl ? '<br><span style="color:#ffcc66">אל על</span>' : '';
+      m.bindPopup(
+        '<b>' +
+          (f.callsign || 'N/A') +
+          '</b>' +
+          popElAl +
+          (popSrc ? '<br><span style="font-size:10px;opacity:0.85">מקור: ' + popSrc + '</span>' : '') +
+          '<br>גובה: ' +
+          flightAltDisplayFt(f)
+      );
     });
   }
   var mf = document.getElementById('m-flights');
   if (mf) mf.textContent = String(s.flights.length);
-  var listN = 12;
+  var listN = 15;
   var html = s.flights.slice(0, listN).map(function (f) {
-    return '<div class="dw-mrow"><span class="dw-mname">' + (f.callsign || 'N/A') + '</span><span class="dw-mval">' + flightAltDisplayFt(f) + '</span></div>';
+    var name = (f.callsign || 'N/A') + (f.isElAl ? ' · אל על' : '');
+    var sub =
+      Array.isArray(f.dataSources) && f.dataSources.length > 1
+        ? '<span style="font-size:9px;color:var(--text3);display:block;margin-top:2px;">' +
+          f.dataSources.join(' · ') +
+          '</span>'
+        : '';
+    return (
+      '<div class="dw-mrow"><span class="dw-mname">' +
+      name +
+      sub +
+      '</span><span class="dw-mval">' +
+      flightAltDisplayFt(f) +
+      '</span></div>'
+    );
   }).join('');
   var av = document.getElementById('aviation-data');
   if (av) {
     var more = s.flights.length > listN ? '<div style="color:var(--text3);font-size:10px;text-align:center;padding-top:8px;">+' + (s.flights.length - listN) + ' נוספים על המפה</div>' : '';
-    av.innerHTML = (html || '<div style="color:var(--text3); text-align:center; padding:20px;">אין טיסות באזור (או מגבלת קצב OpenSky)</div>') + more;
+    av.innerHTML =
+      (html ||
+        '<div style="color:var(--text3); text-align:center; padding:20px;">אין טיסות באזור (OpenSky / ADSB)</div>') + more;
   }
   var srcAv = document.getElementById('source-aviation');
   if (srcAv) {
@@ -3614,7 +3640,7 @@ function updateFlights(data) {
   if (n !== _activityLogFlightsCount || nowMs - _activityLogFlightsAt >= 50000) {
     _activityLogFlightsCount = n;
     _activityLogFlightsAt = nowMs;
-    addActivity('✈️ תעופה חיה (OpenSky): ' + n + ' מטוסים במרחב האיסוף');
+    addActivity('✈️ תעופה חיה (OpenSky+ADS-B): ' + n + ' מטוסים במרחב האיסוף');
   }
 }
 function updateMarkets(data) {
