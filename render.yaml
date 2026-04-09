@@ -1,6 +1,10 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 # שורש הריפו חייב להכיל monitor.html + package.json + תיקיית backend (לא לבחור Root Directory = backend)
 #
+# חשוב: קובץ .env המקומי לא עולה לגיט — ב-Render → Environment יש להזין ידנית Secrets:
+#   OPENAI_API_KEY, TELEGRAM_BOT_TOKEN (אם משתמשים בטלגרם), OPENSKY_* אופציונלי
+# בדיקה: GET https://YOUR-SERVICE.onrender.com/health — שדה deployment (בלי חשיפת סודות)
+#
 # פריסה מהירה (אחרי git push ל-GitHub):
 # 1) render.com — Sign up — Connect GitHub
 # 2) New — Blueprint — בחר ריפו — Deploy
@@ -16,4 +20,9 @@ services:
     healthCheckPath: /health
     envVars:
       - key: TZOFAR_BACKUP_ENABLED
+        value: "1"
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      # דורש בנוסף ב-Dashboard: OPENAI_API_KEY + TELEGRAM_BOT_TOKEN — אחרת הפולר יוצא מיד
+      - key: TELEGRAM_MISSILE_AI
         value: "1"

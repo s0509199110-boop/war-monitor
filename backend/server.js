@@ -6754,11 +6754,26 @@ app.get('/health', (req, res) => {
     } catch (e) {
       console.warn('[HTTP] /health news count:', e.message);
     }
+    const tgTok = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    const openaiOk = Boolean(String(OPENAI_API_KEY || '').trim());
+    const tgMissileFlag = process.env.TELEGRAM_MISSILE_AI === '1';
     res.json({
       status: 'healthy',
       startedAt: state.startedAt,
       uptimeSec: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
+      /** בלי ערכים סודיים — לבדיקה מול מחשב מקומי (.env) לעומת Render Dashboard */
+      deployment: {
+        openaiKeyPresent: openaiOk,
+        telegramBotTokenPresent: Boolean(tgTok),
+        telegramMissileAiEnvOn: tgMissileFlag,
+        telegramMissilePipelineReady: tgMissileFlag && openaiOk && Boolean(tgTok),
+        launchAxisAiEnabled: process.env.LAUNCH_AXIS_AI_ENABLED === '1',
+        activeMissilesCount: Array.isArray(state.activeMissiles) ? state.activeMissiles.length : 0,
+        activeAlertsCount: Array.isArray(state.activeAlerts) ? state.activeAlerts.length : 0,
+        hint:
+          'טילים מפיקוד העורף תלויים ב־alerts.json בלבד. טילים מוקדמים מטלגרם+AI דורשים TELEGRAM_MISSILE_AI=1 + OPENAI_API_KEY + TELEGRAM_BOT_TOKEN בשרת (לא בגיט).',
+      },
       oref: getUnifiedOrefStatus(),
       osint: getOsintDebugSnapshot(),
       tzofarBackup: tzofarBackupClient
@@ -6772,6 +6787,9 @@ app.get('/health', (req, res) => {
       telegramMissile: {
         pollInFlight: telegramMissilePollInFlight,
         lastRunAt: telegramMissileLastRunAt,
+        envFlagOn: tgMissileFlag,
+        openaiPresent: openaiOk,
+        botTokenPresent: Boolean(tgTok),
       },
       pollers: {
         orefPollInFlight,
