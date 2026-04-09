@@ -5683,6 +5683,52 @@ async function fetchNASAFIRMS() {
   }
 }
 
+/**
+ * שורה מ־MyShipTracking vesselsonmaptempTTT: לעיתים TSV (טאבים), לעיתים מופרד ברווחים עם שם מרובה מילים.
+ * פענוח שגוי (רק split לפי טאב) החזיר 0 ספינות משרתי ענן למרות תשובה תקינה.
+ */
+function parseMyShipTrackingLine(line) {
+  if (!line || !/^\d+\s+\d+\s+\d{6,10}\s+/i.test(line)) return null;
+  if (line.indexOf('\t') >= 0) {
+    const cols = line
+      .split(/\t+/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (cols.length >= 8) {
+      const lat = Number(cols[4]);
+      const lng = Number(cols[5]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return {
+        lat,
+        lng,
+        name: String(cols[3] || 'Vessel').trim() || 'Vessel',
+        type: 'AIS (public)',
+        speed: Number(cols[6] || 0),
+        course: Number(cols[7] || 0),
+        mmsi: String(cols[2] || '').trim(),
+      };
+    }
+  }
+  const parts = line.split(/\s+/).filter(Boolean);
+  if (parts.length < 10) return null;
+  const lat = Number(parts[parts.length - 6]);
+  const lng = Number(parts[parts.length - 5]);
+  const speed = Number(parts[parts.length - 4]);
+  const course = Number(parts[parts.length - 3]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const mmsi = String(parts[2] || '').trim();
+  const name = parts.slice(3, parts.length - 6).join(' ').trim() || 'Vessel';
+  return {
+    lat,
+    lng,
+    name,
+    type: 'AIS (public)',
+    speed: Number.isFinite(speed) ? speed : 0,
+    course: Number.isFinite(course) ? course : 0,
+    mmsi,
+  };
+}
+
 async function fetchShipTracking() {
   try {
     if (process.env.VESSELAPI_KEY) {
@@ -5797,23 +5843,8 @@ async function fetchShipTracking() {
           .filter(Boolean);
         const ships = [];
         for (const line of lines) {
-          // פורמט שורה לדוגמה:
-          // 7  0  MMSI  NAME  LAT  LNG  SPEED  COURSE ...
-          if (!/^\d+\s+\d+\s+\d{6,10}\s+/i.test(line)) continue;
-          const cols = line.split(/\t+/);
-          if (!cols || cols.length < 8) continue;
-          const lat = Number(cols[4]);
-          const lng = Number(cols[5]);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-          ships.push({
-            lat,
-            lng,
-            name: String(cols[3] || 'Vessel').trim() || 'Vessel',
-            type: 'AIS (public)',
-            speed: Number(cols[6] || 0),
-            course: Number(cols[7] || 0),
-            mmsi: String(cols[2] || '').trim(),
-          });
+          const row = parseMyShipTrackingLine(line);
+          if (row) ships.push(row);
         }
         if (ships.length > 0) {
           return ships.slice(0, 200);
