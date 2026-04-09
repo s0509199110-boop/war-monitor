@@ -974,6 +974,38 @@ header { background: var(--bg2); border-bottom: 1px solid var(--border); padding
   .event-feed-wrap {
     max-height: min(52vh, 420px);
   }
+  /* צ׳אט במובייל: גובה מינימלי ברור — בלי זה flex:1 על הורה ללא גובה קורס לאזור הודעות כמעט ל-0 */
+  .left-panel {
+    min-height: min(72dvh, 720px);
+  }
+  .live-chat-panel {
+    flex: 1 1 auto;
+    min-height: min(38dvh, 320px);
+  }
+  .chat-messages {
+    flex: 1 1 auto;
+    min-height: min(30dvh, 260px);
+    max-height: min(46dvh, 400px);
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+  .chat-line-meta { font-size: 10px; }
+  .chat-line-text { font-size: 13px; line-height: 1.45; }
+  .chat-gate-hint { font-size: 12px; }
+  .chat-input-name, .chat-msg-input {
+    font-size: 16px;
+    padding: 10px 12px;
+  }
+  .chat-join-btn, .chat-send-btn {
+    font-size: 12px;
+    padding: 10px 14px;
+    min-height: 44px;
+  }
+  .live-chat-header { padding: 10px 12px; }
+  .live-chat-title { font-size: 12px; }
+  .live-chat-badge { font-size: 10px; padding: 3px 8px; }
+  .chat-user-bar { font-size: 11px; padding: 8px 10px; }
+  .chat-leave-btn { font-size: 10px; padding: 5px 10px; }
   .country-threat-grid { grid-template-columns: 1fr; }
   .source-health-grid { grid-template-columns: 1fr; }
   .bb-widget-quad .bb-quad-col { flex: 1 1 100%; min-height: 100px; }
