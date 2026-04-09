@@ -863,16 +863,89 @@ header { background: var(--bg2); border-bottom: 1px solid var(--border); padding
   .map-container {
     order: 2;
     width: 100%;
-    min-height: 240px;
-    height: 42vh;
-    height: 42dvh;
-    max-height: 480px;
+    min-height: 0;
+    height: auto;
+    max-height: none;
     flex-shrink: 0;
     position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-bottom: 1px solid var(--border2);
   }
+  /* מפה לבד בלי חפיפה — פאנלים עוברים לזרימה מתחתיה */
   #map {
-    min-height: 220px;
+    order: 1;
+    flex: 0 0 auto;
+    height: 42vh;
+    height: 42dvh;
+    min-height: 260px;
+    max-height: 480px;
+    width: 100% !important;
+    z-index: 1;
   }
+  .left-map-stack {
+    order: 2;
+    position: relative;
+    top: auto;
+    left: auto;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    background: rgba(8, 12, 16, 0.97);
+    border-top: 1px solid var(--border2);
+    z-index: 2;
+  }
+  .left-map-stack .threat-gauge,
+  .left-map-stack .event-legend,
+  .left-map-stack .map-legend {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 140px;
+    max-width: 100%;
+  }
+  .live-status {
+    order: 3;
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    margin: 0 10px 8px;
+    padding: 8px 10px;
+    max-width: none;
+    pointer-events: auto;
+    z-index: 2;
+  }
+  .layer-panel {
+    order: 4;
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    width: calc(100% - 20px);
+    max-width: none;
+    min-width: 0;
+    margin: 0 10px 10px;
+    box-sizing: border-box;
+    z-index: 2;
+  }
+  .time-machine {
+    order: 5;
+    flex-shrink: 0;
+    z-index: 2;
+    padding: 8px 10px;
+  }
+  .layer-item { font-size: 9px; padding: 5px 0; }
+  .live-status-title { font-size: 12px; }
+  .timeline-controls { flex-wrap: wrap; gap: 6px; }
+  .tm-btn { padding: 6px 8px; font-size: 10px; }
+  .map-controls { bottom: 8px; right: 8px; }
   .left-panel {
     order: 3;
     width: 100%;
@@ -901,32 +974,6 @@ header { background: var(--bg2); border-bottom: 1px solid var(--border); padding
   .event-feed-wrap {
     max-height: min(52vh, 420px);
   }
-  .left-map-stack {
-    width: min(168px, 46vw);
-    max-height: calc(42dvh - 20px);
-    top: 4px;
-    left: 4px;
-    gap: 4px;
-  }
-  .layer-panel {
-    top: 52px;
-    right: 6px;
-    min-width: 118px;
-    padding: 6px;
-  }
-  .layer-item { font-size: 9px; padding: 5px 0; }
-  .live-status {
-    top: 6px;
-    right: 6px;
-    left: 6px;
-    max-width: none;
-    padding: 8px 10px;
-  }
-  .live-status-title { font-size: 12px; }
-  .time-machine { padding: 8px 10px; }
-  .timeline-controls { flex-wrap: wrap; gap: 6px; }
-  .tm-btn { padding: 6px 8px; font-size: 10px; }
-  .map-controls { bottom: 10px; right: 6px; }
   .country-threat-grid { grid-template-columns: 1fr; }
   .source-health-grid { grid-template-columns: 1fr; }
   .bb-widget-quad .bb-quad-col { flex: 1 1 100%; min-height: 100px; }
