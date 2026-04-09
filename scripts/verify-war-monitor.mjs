@@ -284,6 +284,31 @@ async function liveChecks(base) {
     `/api/dashboard תקין (כולל ships=${j.ships.length}, fires=${j.fires.length}, seismic=${j.seismic.length})`
   );
 
+  r = await httpGet(`${base}/api/feed/events?limit=5`);
+  if (r.status !== 200) {
+    fail(`/api/feed/events סטטוס ${r.status}`);
+    return false;
+  }
+  try {
+    j = JSON.parse(r.body);
+  } catch {
+    fail('/api/feed/events לא JSON תקין');
+    return false;
+  }
+  if (!j.ok) {
+    fail('/api/feed/events ok=false');
+    return false;
+  }
+  if (!Array.isArray(j.events)) {
+    fail('/api/feed/events.events חייב להיות מערך');
+    return false;
+  }
+  if (typeof j.count !== 'number' || !Number.isFinite(j.count)) {
+    fail('/api/feed/events.count חסר או לא מספר');
+    return false;
+  }
+  ok(`/api/feed/events תקין (פיד שמור בשרת, count=${j.count})`);
+
   r = await httpGet(homeUrl);
   if (r.status !== 200) {
     fail(`דף הבית סטטוס ${r.status}`);

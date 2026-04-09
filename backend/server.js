@@ -276,7 +276,6 @@ let clientEventFeedSeq = 0;
 
 const CLIENT_EVENT_FEED_FILE = path.join(ROOT_DIR, 'data', 'client-event-feed.json');
 const OSINT_IMPACT_REGISTRY_FILE = path.join(ROOT_DIR, 'data', 'osint-impact-registry.json');
-let clientEventFeedSaveTimer = null;
 let osintImpactRegistrySaveTimer = null;
 
 function scheduleSaveOsintImpactRegistry() {
@@ -390,7 +389,8 @@ function loadPersistedClientEventFeed() {
       console.log(
         `[Feed] Loaded ${state.clientEventFeed.length} event(s) (12h + cap; from ${deduped.length} raw rows)`
       );
-      schedulePersistClientEventFeed();
+      /* שמירה מיידית אחרי נרמול טעינה — הקובץ תואם למה שבזיכרון (בלי debounce של 400ms) */
+      savePersistedClientEventFeedSync();
     }
   } catch (e) {
     console.warn('[Feed] Could not load persisted feed:', e.message);
@@ -407,19 +407,7 @@ function savePersistedClientEventFeedSync() {
   }
 }
 
-function schedulePersistClientEventFeed() {
-  if (clientEventFeedSaveTimer) clearTimeout(clientEventFeedSaveTimer);
-  clientEventFeedSaveTimer = setTimeout(() => {
-    clientEventFeedSaveTimer = null;
-    savePersistedClientEventFeedSync();
-  }, 400);
-}
-
 function flushPersistClientEventFeedSync() {
-  if (clientEventFeedSaveTimer) {
-    clearTimeout(clientEventFeedSaveTimer);
-    clientEventFeedSaveTimer = null;
-  }
   savePersistedClientEventFeedSync();
 }
 
@@ -528,7 +516,8 @@ function appendServerFeedEntry(entry) {
   } catch (e) {
     /* ignore */
   }
-  schedulePersistClientEventFeed();
+  /* שמירה מיידית לדיסק — אותו עיקרון כמו בצ׳אט; מונע איבוד שורה אחרונה בכיבוי/פריסה מהירה */
+  flushPersistClientEventFeedSync();
   return row;
 }
 
@@ -1231,7 +1220,7 @@ function mergeOrefHistoryIntoClientFeed(historyRows) {
     .map((r) => serverFeedLogicalDedupeKey(r))
     .join('\n');
   state.clientEventFeed = capped;
-  schedulePersistClientEventFeed();
+  flushPersistClientEventFeedSync();
   if (sig !== lastOrefHistoryFeedSig) {
     lastOrefHistoryFeedSig = sig;
     try {
@@ -6702,6 +6691,24 @@ app.get('/api/chat/history', (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: 'chat_history_failed' });
+  }
+});
+
+/** פיד אירועים (פיקוד) — אותו מקור כמו feed_bootstrap בסוקט + data/client-event-feed.json */
+app.get('/api/feed/events', (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const raw = Array.isArray(state.clientEventFeed) ? state.clientEventFeed : [];
+    const lim = Math.min(2000, Math.max(1, Number.parseInt(String(req.query.limit || ''), 10) || raw.length));
+    const slice = raw.slice(0, lim);
+    res.json({
+      ok: true,
+      count: raw.length,
+      returned: slice.length,
+      events: slice,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'feed_events_failed' });
   }
 });
 
