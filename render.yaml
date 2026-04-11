@@ -30,3 +30,5 @@ services:
       # דורש בנוסף ב-Dashboard: OPENAI_API_KEY + TELEGRAM_BOT_TOKEN — אחרת הפולר יוצא מיד
       - key: TELEGRAM_MISSILE_AI
         value: "1"
+      - key: TELEGRAM_PUBLIC_CHANNELS
+        value: "tzevaadomm,PikudHaOref_all,idfonline,kann_news,News12web,GLZRadio,wallanews,TheIntelFrog,geoconfirmed,haaretzonline"
