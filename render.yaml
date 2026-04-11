@@ -23,6 +23,10 @@ services:
         value: "1"
       - key: TRUST_PROXY_HOPS
         value: "1"
+      - key: OREF_CLIENT_SOCKET_EMIT_GAP_MS
+        value: "5"  # מהיר יותר - 5ms במקום 36ms ברירת מחדל
+      - key: OREF_POLL_MS
+        value: "1000"  # Poll לפיקוד העורף כל שנייה במקום 1.5 שניות
       # דורש בנוסף ב-Dashboard: OPENAI_API_KEY + TELEGRAM_BOT_TOKEN — אחרת הפולר יוצא מיד
       - key: TELEGRAM_MISSILE_AI
         value: "1"
