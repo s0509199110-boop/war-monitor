@@ -111,7 +111,8 @@ class TzofarBackupClient {
 
     this.ws.on('open', () => {
       this.connected = true;
-      this.log.info('[Tzofar backup] מחובר ל-WebSocket');
+      this.log.info('[Tzofar backup] מחובר ל-WebSocket successfully');
+      this.log.info(`[Tzofar backup] WebSocket URL: ${this.wsUrl}`);
       if (this.pingInterval) clearInterval(this.pingInterval);
       this.pingInterval = setInterval(() => {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -160,7 +161,9 @@ class TzofarBackupClient {
 
   handleMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
+    this.log.info(`[Tzofar backup] Received message type: ${msg.type}`);
     if (msg.type === 'ALERT' && msg.data) {
+      this.log.info(`[Tzofar backup] ALERT received: ${msg.data.cities?.length || 0} cities`);
       this.handleAlert(msg.data);
       return;
     }
@@ -170,10 +173,17 @@ class TzofarBackupClient {
   }
 
   handleAlert(data) {
-    if (!data || data.isDrill) return;
-    if (!Array.isArray(data.cities) || data.cities.length === 0) return;
+    if (!data || data.isDrill) {
+      this.log.info('[Tzofar backup] Alert ignored: drill or no data');
+      return;
+    }
+    if (!Array.isArray(data.cities) || data.cities.length === 0) {
+      this.log.info('[Tzofar backup] Alert ignored: no cities');
+      return;
+    }
     const threat = Number.isFinite(Number(data.threat)) ? Number(data.threat) : 0;
     const ts = Date.now();
+    this.log.info(`[Tzofar backup] Processing ${data.cities.length} cities, threat=${threat}`);
     for (const c of data.cities) {
       if (typeof c !== 'string' || !c.trim()) continue;
       if (c === 'רחבי הארץ') {
@@ -181,7 +191,9 @@ class TzofarBackupClient {
         continue;
       }
       this.activeCities.set(c.trim(), { threat, ts });
+      this.log.info(`[Tzofar backup] Added city: ${c.trim()}`);
     }
+    this.log.info(`[Tzofar backup] Total active cities: ${this.activeCities.size}`);
   }
 
   handleSystemMessage(data) {
@@ -205,6 +217,7 @@ class TzofarBackupClient {
    * מבנה דמוי-alerts.json עבור normalizeOrefAlerts
    */
   buildOrefLikePayload() {
+    this.log.info(`[Tzofar backup] buildOrefLikePayload called, activeCities.size=${this.activeCities.size}`);
     if (this.activeCities.size === 0) return [];
     const grouped = new Map();
     for (const [cityName, info] of this.activeCities.entries()) {
