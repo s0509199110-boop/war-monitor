@@ -4734,18 +4734,28 @@ async function pollOrefMissileLayer() {
       orefOfficialOk = false;
     }
 
-    /* מקור יחיד: פיקוד העורף. גיבוי (צופר) רק כש־HTTP/רשת או ש־JSON לא תקין — לא כשמקבלים [] או מערך תקין מפיקוד. */
+    /* מקור יחיד: פיקוד העורף. גיבוי (צופר) כש־HTTP/רשת או ש־JSON לא תקין — או כשחסום (403). */
     let usedTzofarPayloadThisPoll = false;
     if (orefOfficialOk && tzofarBackupClient) {
       tzofarBackupClient.resetShadowState();
-    } else if (!orefOfficialOk && tzofarBackupClient) {
-      const syn = tzofarBackupClient.buildOrefLikePayload();
-      if (syn.length > 0) {
-        parsedPayload = syn;
-        usedTzofarPayloadThisPoll = true;
-        console.warn(
-          `[Oref] גיבוי צופר: ${syn.length} קבוצות התרעה (פיקוד לא זמין או תשובה לא תקינה).`
-        );
+    }
+    
+    // Always try Tzofar backup when Oref fails or is blocked (403)
+    if (!orefOfficialOk) {
+      if (tzofarBackupClient) {
+        const syn = tzofarBackupClient.buildOrefLikePayload();
+        console.log(`[Oref] Tzofar backup check: syn.length=${syn.length}`);
+        if (syn.length > 0) {
+          parsedPayload = syn;
+          usedTzofarPayloadThisPoll = true;
+          console.warn(
+            `[Oref] גיבוי צופר: ${syn.length} קבוצות התרעה (פיקוד לא זמין/חסום).`
+          );
+        } else {
+          console.warn('[Oref] גיבוי צופר: אין נתונים זמינים מצופר');
+        }
+      } else {
+        console.warn('[Oref] גיבוי צופר לא מאותחל - TZOFAR_BACKUP_ENABLED לא מוגדר?');
       }
     }
     orefLastPollUsedTzofarBackup = usedTzofarPayloadThisPoll;
