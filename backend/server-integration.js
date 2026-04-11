@@ -54,13 +54,13 @@ function estimateMissileSource(targetLat, targetLng) {
     };
   }
   
-  // ׳׳™׳¨׳׳/׳¢׳™׳¨׳׳§ (׳׳¨׳›׳–/׳׳–׳¨׳—)
+  // ברירת מחדל: לבנון (לא איראן/עיראק - מושבת לפי דרישה)
   return {
-    sourceLat: 32.5 + (Math.random() - 0.5) * 2.0,
-    sourceLng: 47.0 + (Math.random() - 0.5) * 3.0,
-    sourceName: '׳׳™׳¨׳׳/׳¢׳™׳¨׳׳§',
-    sourceCountry: 'IR',
-    missileType: '׳˜׳™׳ ׳‘׳׳™׳¡׳˜׳™'
+    sourceLat: 33.8 + (Math.random() - 0.5) * 0.3,
+    sourceLng: 35.5 + (Math.random() - 0.5) * 0.5,
+    sourceName: 'לבנון',
+    sourceCountry: 'LB',
+    missileType: 'רקטה/טיל נ"ט'
   };
 }
 

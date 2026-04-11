@@ -33,13 +33,13 @@ const TELEGRAM_SOURCE_REGION_PATTERNS = [
   { region: 'yemen', re: /(מתימן|ממרחב\s+תימן|מצנעא|מסעדה|מחודיידה)/i },
   { region: 'lebanon', re: /(מלבנון|ממרחב\s+לבנון|ממרחב\s+צור|ממרחב\s+צידון|ממרחב\s+נבטיה|ממרחב\s+בינת\s*ג[׳']בייל|מצור|מצידון|מנבטיה)/i },
   { region: 'gaza', re: /(מעזה|ממרחב\s+עזה|ממרחב\s+חאן\s*יונס|ממרחב\s+רפיח|ממרחב\s+דיר\s*אל\s*בלח|מחאן\s*יונס|מרפיח)/i },
-  { region: 'syria', re: /(מסוריה|ממרחב\s+סוריה|מדמשק|מחומס|מדרעא|מקוניטרה)/i },
+  { region: 'lebanon', re: /(מסוריה|ממרחב\s+סוריה|מדמשק|מחומס|מדרעא|מקוניטרה)/i },
   { region: 'iran', re: /(\bfrom iran\b|\blaunched from iran\b|\biran fired\b|\biranian (?:missile|rockets?|strike|attack|launch)\b)/i },
   { region: 'iraq', re: /(\bfrom iraq\b|\blaunched from iraq\b|\biraqi (?:missile|rocket|strike)\b)/i },
   { region: 'yemen', re: /(\bfrom yemen\b|\bhouthi (?:missile|rocket|drone|strike)\b|\bhouthis (?:fire|launch)\b)/i },
   { region: 'lebanon', re: /(\bfrom lebanon\b|\bhezbollah (?:fire|launch|rocket|missile)\b|\bfrom southern lebanon\b)/i },
   { region: 'gaza', re: /(\bfrom gaza\b|\bhamas (?:fire|launch|rocket|missile)\b|\bfrom the gaza strip\b)/i },
-  { region: 'syria', re: /(\bfrom syria\b|\bfrom damascus\b|\bsyrian (?:missile|rocket|strike)\b)/i },
+  { region: 'lebanon', re: /(\bfrom syria\b|\bfrom damascus\b|\bsyrian (?:missile|rocket|strike)\b)/i },
 ];
 
 const TELEGRAM_TARGET_ZONE_PATTERNS = [

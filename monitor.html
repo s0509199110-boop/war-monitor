@@ -2281,7 +2281,7 @@ function init() {
   initBackendSetupBanner();
   initMap(); initClock(); initLayers(); restoreLiveState(); initOrefSoundToggle(); initSocket();
   hydrateOrefEventFeedFromLocalStorage();
-      fetchDashboard(); setInterval(fetchDashboard, 3000);
+      fetchDashboard(); setInterval(fetchDashboard, 2000);
   renderEvents();
 }
 function initMap() {
@@ -3189,6 +3189,26 @@ function initSocket() {
         syncOrefNarratorPikudThreatState(true);
       }
       addAlert(data);
+      try {
+        var _cn = (data && (data.cityName || data.city)) || '';
+        var _sr = (data && data.sourceRegion) || '';
+        addActivity(
+          '🛡 פיקוד העורף · ' +
+            (_cn || 'יעד') +
+            ' · ' +
+            ph +
+            (_sr ? ' · מוצא: ' + _sr : '') +
+            ' · סנכרון סוקט'
+        );
+      } catch (eAct) {}
+      try {
+        if (
+          window.warMonitorMissiles &&
+          typeof window.warMonitorMissiles.ensureLiveBallisticFromSingleAlert === 'function'
+        ) {
+          window.warMonitorMissiles.ensureLiveBallisticFromSingleAlert(data);
+        }
+      } catch (eSynAlert) {}
     });
   });
   s.socket.on('alert_release', (data) => {
@@ -3753,9 +3773,9 @@ function updateLiveThreatAssessment() {
     if (lat >= 29.5 && lat <= 33.5 && lng >= 34 && lng <= 35.9) return 'israel';
     if (lat >= 32.7 && lat <= 34.8 && lng >= 35.1 && lng <= 36.7) return 'lebanon';
     if (lat >= 31.1 && lat <= 34.8 && lng >= 35.2 && lng <= 42.6) return 'jordan';
-    if (lat >= 32 && lat <= 37.5 && lng >= 35.5 && lng <= 42.8) return 'syria';
+    if (lat >= 32 && lat <= 37.5 && lng >= 35.5 && lng <= 42.8) return 'lebanon';
     if (lat >= 29 && lat <= 37.8 && lng >= 41.5 && lng <= 48.8) return 'iraq';
-    if (lat >= 24 && lat <= 40.5 && lng >= 44 && lng <= 64.5) return 'iran';
+    if (lat >= 24 && lat <= 40.5 && lng >= 44 && lng <= 64.5) return 'iraq';
     if (lat >= 11 && lat <= 19.5 && lng >= 42 && lng <= 54.5) return 'yemen';
     if (lat >= 30.8 && lat <= 33.2 && lng >= 34.1 && lng <= 34.8) return 'gaza';
     if (lat >= 16 && lat <= 32.5 && lng >= 34 && lng <= 56) return 'saudi';
@@ -3767,9 +3787,9 @@ function updateLiveThreatAssessment() {
       ((article && article.title) || '') + ' ' +
       ((article && article.description) || '')
     ).toLowerCase();
-    if (text.includes('איראן') || text.includes('iran')) return 'iran';
+    if (text.includes('איראן') || text.includes('iran')) return 'unknown';
     if (text.includes('לבנון') || text.includes('חיזבאללה') || text.includes('lebanon') || text.includes('hezbollah')) return 'lebanon';
-    if (text.includes('סוריה') || text.includes('syria')) return 'syria';
+    if (text.includes('סוריה') || text.includes('syria')) return 'lebanon';
     if (text.includes('עזה') || text.includes('חמאס') || text.includes('gaza') || text.includes('hamas')) return 'gaza';
     if (text.includes('עיראק') || text.includes('iraq')) return 'iraq';
     if (text.includes('תימן') || text.includes('חות') || text.includes('yemen') || text.includes('houth')) return 'yemen';
@@ -3912,13 +3932,6 @@ function updateLiveThreatAssessment() {
       ),
     },
     {
-      name: '🇮🇷 איראן',
-      score: clampScore(
-        (2.1 + (byRegion.iran || 0) * 0.95 + (alertRegionCounts.iran || 0) * 0.52 + (confidenceWeightedLaunches.iran || 0) * 1.18 + Math.min(1.5, (flightRegionCounts.iran || 0) * 0.04) + Math.min(2.1, (newsRegionCounts.iran || 0) * 0.14)) *
-          warTheaterRegions.iran
-      ),
-    },
-    {
       name: '🇱🇧 לבנון',
       score: clampScore(
         (2.0 + (byRegion.lebanon || 0) * 0.9 + (alertRegionCounts.lebanon || 0) * 0.55 + (confidenceWeightedLaunches.lebanon || 0) * 1.14 + Math.min(1.3, (flightRegionCounts.lebanon || 0) * 0.04) + Math.min(2.0, (newsRegionCounts.lebanon || 0) * 0.13)) *
@@ -3994,6 +4007,10 @@ function updateLiveThreatAssessment() {
     return row;
   });
 
+  rows = rows.filter(function (row) {
+    return row.name.indexOf('איראן') < 0;
+  });
+
   grid.innerHTML = rows
     .map(function (row) {
       var cls = levelClass(row.score);
@@ -4012,7 +4029,6 @@ function updateLiveThreatAssessment() {
     .join('');
 
   var launcherActivity =
-    (confidenceWeightedLaunches.iran || 0) +
     (confidenceWeightedLaunches.lebanon || 0) +
     (confidenceWeightedLaunches.syria || 0) +
     (confidenceWeightedLaunches.gaza || 0) +
@@ -4045,13 +4061,17 @@ function updateLiveThreatAssessment() {
       default: return key;
     }
   }
-  var launchOrder = ['iran', 'lebanon', 'syria', 'gaza', 'iraq', 'yemen', 'unknown'];
+  var launchOrder = ['lebanon', 'syria', 'gaza', 'yemen', 'iraq', 'unknown'];
   var launchParts = [];
   launchOrder.forEach(function (key) {
     var c = byRegion[key] || 0;
     if (c > 0) launchParts.push({ key: key, c: c, label: regionLaunchLabel(key) });
   });
-  launchParts.sort(function (a, b) { return b.c - a.c; });
+  var launchPriority = { lebanon: 0, syria: 1, gaza: 2, yemen: 3, iraq: 4, unknown: 5 };
+  launchParts.sort(function (a, b) {
+    if (b.c !== a.c) return b.c - a.c;
+    return (launchPriority[a.key] != null ? launchPriority[a.key] : 9) - (launchPriority[b.key] != null ? launchPriority[b.key] : 9);
+  });
   var summaryEl = document.getElementById('launcher-origin-summary');
   var mapHintEl = document.getElementById('map-launcher-hint');
   var launchSummaryText =
@@ -4059,7 +4079,7 @@ function updateLiveThreatAssessment() {
       ? 'מוצא משוער לפי מסלולים פעילים במפה (אותו חישוב כמו קו הטיל): ' +
         launchParts.map(function (p) { return p.label + ' ×' + p.c; }).join(' · ')
       : missileN === 0
-        ? 'אין כרגע מסלול איום פעיל במפה. כשתיכנס התראת פיקוד העורף יחושב מוצא לפי יעד + טקסט/ציר איום, יוצג קו על המפה, והציונים למעלה ישקפו את אזור המוצא.'
+        ? 'אין כרגע מסלול איום פעיל במפה. כשתיכנס התראת פיקוד העורף יחושב מוצא לפי יעד: ברירת מחדל לירי לצפון/מרכז היא לבנון; לדרום, טווח ארוך ללא ציון מפורש — הטיה לתימן. מוצא איראן אינו מוצג במערכת.'
         : '';
   var lockedTrajectoryN = 0;
   if (window.__liveThreatMap && typeof window.__liveThreatMap.forEach === 'function') {
@@ -4131,13 +4151,22 @@ function updateNews(data) {
   setSourceChipState('source-news', articles.length > 0 ? ('מחובר · ' + articles.length) : 'אין כתבות', articles.length > 0 ? 'ok' : 'warn');
   updateTicker(articles);
 }
+function stripIranMentionsFromSummaryText(t) {
+  if (!t) return t;
+  var s = String(t);
+  s = s.replace(/\s*איראן\s*\([^)]*\)/gi, '');
+  s = s.replace(/\s*Iran\s*\([^)]*\)/gi, '');
+  s = s.replace(/\s*,\s*,/g, ',');
+  s = s.replace(/^\s*,\s*|\s*,\s*$/g, '');
+  return s.replace(/\s{2,}/g, ' ').trim();
+}
 function updateAISummary(summary) {
   var aiEl = document.getElementById('ai-summary-text');
   var widgetEl = document.getElementById('summary-widget');
   if (!aiEl || !widgetEl) return;
   if (!summary && aiEl.dataset.hasSummary === '1') return;
-  var headline = summary && summary.headline ? String(summary.headline).trim() : '';
-  var body = summary && summary.body ? String(summary.body).trim() : '';
+  var headline = summary && summary.headline ? stripIranMentionsFromSummaryText(String(summary.headline).trim()) : '';
+  var body = summary && summary.body ? stripIranMentionsFromSummaryText(String(summary.body).trim()) : '';
   var generatedAt = summary && summary.generatedAt ? formatArticleDateTime(new Date(summary.generatedAt)) : '';
   if (!headline) headline = 'אין סיכום AI חי זמין כרגע.';
   if (!body) body = 'המערכת עוקבת אחר הזירה בזמן אמת. אם ייקלטו אירועים חיים הם יוצגו כאן באופן אחוד. רצוי להמשיך במעקב.';
@@ -4280,7 +4309,11 @@ async function fetchDashboard() {
     if (!data || typeof data !== 'object') return;
     /* תמיד מאחדים עם oref.activeCities — מונע prune של טילים אחרי רענון כשיש אי־התאמה קלה בין מערכי הדשבורד */
     const cityParts = []
-      .concat((data.activeAlerts || []).map(function(alert) { return settlementMatchKeyClient(alert && alert.cityName); }))
+      .concat(
+        (data.activeAlerts || []).map(function (alert) {
+          return settlementMatchKeyClient(alert && (alert.cityName || alert.city));
+        })
+      )
       .concat((data.activeMissiles || []).map(function(missile) { return settlementMatchKeyClient(missile && (missile.cityName || missile.city)); }))
       .concat(((data.oref && data.oref.activeCities) || []).map(function(city) { return settlementMatchKeyClient(city); }))
       .filter(Boolean);
@@ -4296,7 +4329,7 @@ async function fetchDashboard() {
       if (rank >= prevRank) activePhaseMap.set(city, phase);
     }
     if (Array.isArray(data.activeAlerts)) data.activeAlerts.forEach(function(alert) {
-      setCityPhase(alert && alert.cityName, alert && alert.alertPhase);
+      setCityPhase(alert && (alert.cityName || alert.city), alert && alert.alertPhase);
     });
     if (Array.isArray(data.activeMissiles)) data.activeMissiles.forEach(function(missile) {
       setCityPhase(missile && (missile.cityName || missile.city), missile && missile.alertPhase);
@@ -4347,6 +4380,13 @@ async function fetchDashboard() {
       var missileSpacing = Math.max(95, Math.min(220, 72 + missileN * 3));
       function finishDashboardThreatSync() {
         try {
+          if (
+            tmLive &&
+            window.warMonitorMissiles &&
+            typeof window.warMonitorMissiles.ensureLiveBallisticFromDashboard === 'function'
+          ) {
+            window.warMonitorMissiles.ensureLiveBallisticFromDashboard(data);
+          }
           if (window.warMonitorMissiles && typeof window.warMonitorMissiles.syncFromDashboard === 'function') {
             window.warMonitorMissiles.syncFromDashboard(serverCities, data);
           } else if (serverCities.size > 0) {
@@ -5827,6 +5867,7 @@ window.onload = init;
     if (!hasRenderableThreatEndpoints(data)) return;
     var c = cloneThreatPayloadForTimeline(data);
     if (!c) return;
+    if (c.threatType !== 'uav') c = normalizeBallisticInboundMapOrigin(c);
     var orefTs = Number(c.orefTimeMs) || Number(c.receivedAtMs) || Date.now();
     timelineMissileById.set(String(c.id), { payload: c, lastOrefMs: orefTs });
     var cutoffPrune = Date.now() - 26 * 60 * 60 * 1000;
@@ -5921,7 +5962,7 @@ window.onload = init;
         targetPosition: row.coordinates,
         target: row.coordinates,
         alertPhase: row.alertPhase || 'pre_alert',
-        sourceRegion: row.sourceRegion || 'iran',
+        sourceRegion: row.sourceRegion || 'lebanon',
         sourcePosition: row.sourcePosition,
         source: row.sourcePosition,
         sourceConfidence: row.sourceConfidence,
@@ -6316,10 +6357,9 @@ window.onload = init;
   }
 
   /**
-   * איחוד מסלולי טיל (לא כטב"ם) רק לפי מה שהשרת שולח אחרי עיבוד פיקוד העורף:
-   * אותו waveId = אותו גל (מרכז משוקלל של כל היעדים בגל).
-   * בלי waveId — מפתח יציב לפי id השרת + יעד: שינוי sourceRegion (פיקוד/AI) לא יוצר שני קווים לאותו טיל.
-   * שני שיגורים במקביל = שני id-ים מהשרת.
+   * איחוד מסלולי טיל (לא כטב"ם) לפי waveId מהשרת, או לפי id השרת + יעד.
+   * טילים סינתטיים מהדשבורד (wm-live-synth / dash-fallback וכו') — מיזוג לפי אזור מוצג + חלון זמן Oref,
+   * כדי שיוצג טיל אחד עד התפצלות ליעדי פיקוד במקום טיל מלא לכל עיר.
    */
   var ballisticMergeByKey = new Map();
   var ballisticMergeDisplayToKey = new Map();
@@ -6333,6 +6373,18 @@ window.onload = init;
       return 'w:' + String(data.waveId);
     }
     var sid = data && data.id != null ? String(data.id) : '';
+    if (
+      sid.indexOf('wm-live-synth-') === 0 ||
+      sid.indexOf('dash-fallback-') === 0 ||
+      sid.indexOf('wm-synth-') === 0
+    ) {
+      var srRaw = String((data && data.sourceRegion) || 'lebanon').toLowerCase();
+      var dispR = mapMissileArcDisplayRegion(srRaw) || srRaw || 'lebanon';
+      var ot = Number(data.orefTimeMs);
+      if (!Number.isFinite(ot)) ot = Date.now();
+      var bucket = Math.floor(ot / 120000);
+      return 'oref-synth:' + dispR + ':' + bucket;
+    }
     var tgt = data && (data.targetPosition || data.target);
     var cell = 'na';
     if (Array.isArray(tgt) && tgt.length >= 2) {
@@ -6418,6 +6470,15 @@ window.onload = init;
     return data;
   }
 
+  /** מוצא מוצג במפה: ללא איראן — עזה/איראן → תימן (ארוך טווח), סוריה → לבנון */
+  function mapMissileArcDisplayRegion(sr) {
+    if (sr == null || sr === '') return '';
+    var r = String(sr).toLowerCase();
+    if (r === 'syria') return 'lebanon';
+    if (r === 'gaza' || r === 'iran') return 'yemen';
+    return r;
+  }
+
   var THREAT_SOURCE_ANCHORS = {
     lebanon: [35.45, 33.62],
     syria: [36.18, 33.35],
@@ -6429,28 +6490,64 @@ window.onload = init;
   };
 
   function getThreatSourceAnchor(region, target) {
-    var r = String(region || 'unknown');
-    /* מסלול מפה: לא מוצא עזה — תואם לשרת (טילים לדרום כבליסטיים מאיראן) */
-    if (r === 'gaza') r = 'iran';
+    var raw = region != null && String(region).trim() !== '' ? String(region).toLowerCase() : 'unknown';
+    var mapped = mapMissileArcDisplayRegion(raw);
+    var r = mapped && mapped !== '' ? mapped : raw;
+    if (r === 'syria') r = 'lebanon';
     var key = r && THREAT_SOURCE_ANCHORS[r] ? r : 'unknown';
     var anchor = THREAT_SOURCE_ANCHORS[key] || THREAT_SOURCE_ANCHORS.unknown;
     if (!Array.isArray(target) || target.length < 2) return anchor.slice();
     if (key === 'lebanon') return [Math.min(anchor[0], Number(target[0]) - 0.03), Math.max(anchor[1], Number(target[1]) + 0.18)];
-    if (key === 'syria') return [36.12, Math.max(33.2, Number(target[1]) + 0.24)];
     return anchor.slice();
+  }
+
+  function normalizeBallisticInboundMapOrigin(data) {
+    if (!data || data.threatType === 'uav') return data;
+    var sr0 = String(data.sourceRegion || '').toLowerCase();
+    var mapped = mapMissileArcDisplayRegion(sr0);
+    if (!mapped || mapped === sr0) return data;
+    var tgt = data.targetPosition || data.target;
+    var anchor = getThreatSourceAnchor(mapped, Array.isArray(tgt) && tgt.length >= 2 ? tgt : null);
+    if (!Array.isArray(anchor) || anchor.length < 2) return data;
+    return Object.assign({}, data, {
+      sourceRegion: mapped,
+      sourcePosition: anchor,
+      source: anchor,
+      sourceLocation: formatSourceRegion(mapped, data.sourceLocation || 'מקור משוער'),
+    });
+  }
+
+  /** [lng,lat] בתוך תיבת יעד ישראל — תומך גם בזוג שהגיע כ־[lat,lng] */
+  function normalizeCoordsLngLatIsrael(coords) {
+    if (!Array.isArray(coords) || coords.length < 2) return null;
+    var a = Number(coords[0]);
+    var b = Number(coords[1]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    if (isIsraelThreatTargetBBox(a, b)) return [a, b];
+    if (isIsraelThreatTargetBBox(b, a)) return [b, a];
+    return null;
   }
 
   function synthesizeBallisticFromAlert(alert) {
     if (!alert || alert.threatType === 'uav') return null;
+    var cityKey = String(alert.cityName || alert.city || '').trim();
     var coords = alert.coordinates || alert.targetPosition || alert.target;
-    if (!Array.isArray(coords) || coords.length < 2) return null;
-    var target = [Number(coords[0]), Number(coords[1])];
-    if (!isIsraelThreatTargetBBox(target[0], target[1])) return null;
+    if (
+      (!Array.isArray(coords) || coords.length < 2) &&
+      cityKey &&
+      typeof resolveCoordsForOrefTimeMachineCity === 'function'
+    ) {
+      coords = resolveCoordsForOrefTimeMachineCity(cityKey);
+    }
+    var target = normalizeCoordsLngLatIsrael(coords);
+    if (!target) return null;
     var trustedSource = alert.sourceConfidence === 'official' || alert.sourceConfidence === 'corroborated';
     var srRaw = String(alert.sourceRegion || 'unknown');
-    var dispRegion = srRaw === 'gaza' ? 'iran' : srRaw;
+    var dispRegion = mapMissileArcDisplayRegion(srRaw) || srRaw;
+    if (dispRegion === 'syria') dispRegion = 'lebanon';
     var useServerSrc =
       srRaw !== 'gaza' &&
+      srRaw !== 'iran' &&
       Array.isArray(alert.sourcePosition) &&
       alert.sourcePosition.length >= 2;
     var source = useServerSrc
@@ -6463,9 +6560,7 @@ window.onload = init;
       city: alert.cityName || alert.city || 'יעד לא ידוע',
       sourceRegion: trustedSource ? dispRegion : null,
       sourceLocation: trustedSource
-        ? srRaw === 'gaza'
-          ? formatSourceRegion('iran', 'מקור משוער')
-          : alert.sourceLocation || formatSourceRegion(dispRegion, 'מקור משוער')
+        ? alert.sourceLocation || formatSourceRegion(dispRegion, 'מקור משוער')
         : alert.sourceLocation || 'מקור לא מאומת',
       sourcePosition: source,
       source: source,
@@ -6798,7 +6893,8 @@ window.onload = init;
     if (data.clusterMunition && !data.clusterMunition.isMother && data.threatType !== 'uav') {
       if (hasRenderableThreatEndpoints(data)) {
         try {
-          window.__liveThreatMap.set(data.id, Object.assign({}, data));
+          var _cl = normalizeBallisticInboundMapOrigin(sanitizeClientInboundBallistic(Object.assign({}, data)));
+          window.__liveThreatMap.set(data.id, _cl);
         } catch (eCl) {}
         persistLiveState();
         if (typeof window.scheduleThreatUiRefresh === 'function') window.scheduleThreatUiRefresh();
@@ -6830,22 +6926,6 @@ window.onload = init;
 
     var inbound = clusterExpanded || data;
     if (!hasRenderableThreatEndpoints(inbound)) return;
-
-    inbound = sanitizeClientInboundBallistic(inbound);
-    if (inbound.threatType !== 'uav' && String(inbound.sourceRegion || '') === 'gaza') {
-      var tgtG = inbound.targetPosition || inbound.target;
-      if (Array.isArray(tgtG) && tgtG.length >= 2) {
-        var iranA = getThreatSourceAnchor('iran', [Number(tgtG[0]), Number(tgtG[1])]);
-        if (Array.isArray(iranA) && iranA.length >= 2) {
-          inbound = Object.assign({}, inbound, {
-            sourceRegion: 'iran',
-            sourcePosition: iranA,
-            source: iranA,
-            sourceLocation: formatSourceRegion('iran', inbound.sourceLocation || 'מקור משוער'),
-          });
-        }
-      }
-    }
 
     if (clusterExpanded) {
       addMissileInternal(inbound);
@@ -6907,7 +6987,7 @@ window.onload = init;
   /* ג”€ג”€ג”€ג”€ג”€ ׳”׳•׳¡׳₪׳× ׳˜׳™׳ ׳׳׳₪׳” ג”€ג”€ג”€ג”€ג”€ */
   function addMissileInternal(data) {
     if (data.threatType !== 'uav') {
-      data = sanitizeClientInboundBallistic(data);
+      data = normalizeBallisticInboundMapOrigin(sanitizeClientInboundBallistic(data));
     }
 
     var map = getMissileLayerTarget();
@@ -6948,10 +7028,17 @@ window.onload = init;
         existingM.alertPhase = data.alertPhase || existingM.alertPhase;
         existingM.city = data.cityName || data.city || existingM.city;
         existingM.cityName = data.cityName || data.city || existingM.cityName;
-        window.__liveThreatMap.set(data.id, Object.assign({}, data, {
-          targetPosition: data.targetPosition || data.target,
-          sourcePosition: data.sourcePosition || data.source,
-        }));
+        var _ndUp =
+          data.threatType !== 'uav'
+            ? normalizeBallisticInboundMapOrigin(Object.assign({}, data))
+            : data;
+        window.__liveThreatMap.set(
+          data.id,
+          Object.assign({}, _ndUp, {
+            targetPosition: data.targetPosition || data.target,
+            sourcePosition: _ndUp.sourcePosition || _ndUp.source || data.sourcePosition || data.source,
+          })
+        );
         persistLiveState();
         if (typeof window.scheduleThreatUiRefresh === 'function') window.scheduleThreatUiRefresh();
         return;
@@ -7024,6 +7111,12 @@ window.onload = init;
       lineWeight = Math.min(0.95, Math.max(0.68, lineWeight * 0.38));
       arcOpacity = Math.min(0.84, Math.max(0.66, arcOpacity * 0.9));
       splitWin = computeBallisticSplitWindow(src, tgt, physicsMs);
+      if (branchTargetList.length > 1) {
+        var t0b = Math.max(splitWin.t0, 0.9);
+        var t1b = Math.min(0.995, Math.max(splitWin.t1, t0b + 0.04));
+        var originB = Math.max(splitWin.originT, Math.min((t0b + t1b) * 0.55, t1b - 0.015));
+        splitWin = { t0: t0b, t1: t1b, originT: originB };
+      }
     }
     var polyOpts = {
       color: data.threatType === 'uav' ? visuals.line : missileArcColor,
@@ -7521,6 +7614,118 @@ window.onload = init;
     });
   }
 
+  function tryLiveBallisticSynthForAlert(alert, covered) {
+    if (!alert || alert.telegramEarly === true) return false;
+    var ph = String(alert.alertPhase || 'pre_alert');
+    if (ph === 'released') return false;
+    if (typeof isActivePikudNarratorPhase === 'function' && !isActivePikudNarratorPhase(ph)) return false;
+    var tt = String(alert.threatType || 'missile');
+    if (tt === 'uav') return false;
+    var cityLabel = alert.cityName || alert.city;
+    if (!cityLabel) return false;
+    var ck = settlementMatchKeyClient(cityLabel);
+    if (!ck || (covered && covered.has(ck))) return false;
+    var nowMs = Date.now();
+    var alertLike = {
+      cityName: cityLabel,
+      city: cityLabel,
+      coordinates: alert.coordinates || alert.targetPosition,
+      targetPosition: alert.targetPosition,
+      target: alert.target,
+      alertPhase: ph,
+      threatType: 'missile',
+      sourceRegion: 'lebanon',
+      sourcePosition: null,
+      source: null,
+      sourceConfidence: alert.sourceConfidence || 'official',
+      sourceConfidenceScore: alert.sourceConfidenceScore != null ? alert.sourceConfidenceScore : 0.55,
+      flightMs: alert.flightMs || 45000,
+      displayFlightMs: alert.displayFlightMs || 22000,
+      displayElapsedMs: alert.displayElapsedMs != null ? alert.displayElapsedMs : 8000,
+      orefTimeMs: Number(alert.orefTimeMs) || Number(alert.updatedAt) || Number(alert.timestamp) || nowMs,
+      updatedAt: nowMs,
+      timestamp: nowMs,
+    };
+    var synth = synthesizeBallisticFromAlert(alertLike);
+    if (!synth || !synth.id) return false;
+    var tgt = synth.targetPosition || synth.target;
+    var lebSrc = getThreatSourceAnchor('lebanon', Array.isArray(tgt) && tgt.length >= 2 ? tgt : null);
+    synth = Object.assign({}, synth, {
+      id: 'wm-live-synth-' + ck,
+      sourceRegion: 'lebanon',
+      sourceLocation: formatSourceRegion('lebanon', 'לבנון'),
+      source: lebSrc,
+      sourcePosition: lebSrc,
+    });
+    try {
+      addMissile(Object.assign({}, synth, { telegramEarly: false }));
+      if (covered) covered.add(ck);
+      if (typeof window.scheduleThreatUiRefresh === 'function') window.scheduleThreatUiRefresh();
+      return true;
+    } catch (eLive) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('[Missile] live synth from alert:', eLive);
+      return false;
+    }
+  }
+
+  function ensureLiveBallisticFromSingleAlert(alert) {
+    if (
+      typeof timeMachine !== 'undefined' &&
+      timeMachine &&
+      typeof timeMachine.isLiveMode === 'function' &&
+      !timeMachine.isLiveMode()
+    ) {
+      return;
+    }
+    var covered = new Set();
+    activeMissiles.forEach(function (m) {
+      if (!m) return;
+      var a = settlementMatchKeyClient(m.city || m.cityName || '');
+      if (a) covered.add(a);
+      if (Array.isArray(m._mergeCityNorms)) {
+        m._mergeCityNorms.forEach(function (x) {
+          if (x) covered.add(x);
+        });
+      }
+    });
+    tryLiveBallisticSynthForAlert(alert, covered);
+  }
+
+  /**
+   * כשהשרת מחזיר התרעות פיקוד אבל activeMissiles ריק — מסלול בליסטי סינתטי ממוצא לבנון לפי יעד.
+   */
+  function ensureLiveBallisticFromDashboard(data) {
+    if (
+      typeof timeMachine !== 'undefined' &&
+      timeMachine &&
+      typeof timeMachine.isLiveMode === 'function' &&
+      !timeMachine.isLiveMode()
+    ) {
+      return;
+    }
+    if (!data || !Array.isArray(data.activeAlerts)) return;
+    var covered = new Set();
+    (data.activeMissiles || []).forEach(function (m) {
+      if (!m || m.telegramEarly === true) return;
+      var a = settlementMatchKeyClient(m.cityName || m.city);
+      if (a) covered.add(a);
+    });
+    activeMissiles.forEach(function (m) {
+      if (!m) return;
+      var a = settlementMatchKeyClient(m.city || m.cityName || '');
+      if (a) covered.add(a);
+      if (Array.isArray(m._mergeCityNorms)) {
+        m._mergeCityNorms.forEach(function (x) {
+          if (x) covered.add(x);
+        });
+      }
+    });
+    var alerts = data.activeAlerts;
+    for (var i = 0; i < alerts.length; i++) {
+      tryLiveBallisticSynthForAlert(alerts[i], covered);
+    }
+  }
+
   function syncFromDashboard(serverCities, data) {
     if (
       typeof timeMachine !== 'undefined' &&
@@ -7735,6 +7940,8 @@ window.onload = init;
     registerMissileSocketHandlers: registerMissileSocketHandlers,
     pruneMissilesNotInCities: pruneMissilesNotInCities,
     removeAllMissiles: removeAll,
+    ensureLiveBallisticFromDashboard: ensureLiveBallisticFromDashboard,
+    ensureLiveBallisticFromSingleAlert: ensureLiveBallisticFromSingleAlert,
     syncFromDashboard: syncFromDashboard,
     clearAllThreatVisuals: clearAllThreatVisuals,
     synthesizeBallisticFromAlert: synthesizeBallisticFromAlert,

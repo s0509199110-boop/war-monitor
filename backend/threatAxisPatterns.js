@@ -28,7 +28,7 @@ function matchThreatAxisInBlob(blob) {
   if (
     /סוריה|דמשק|syria|\bsyria\b|חלב|חומס|אידליב|תדמור|קמישלי|aleppo|idlib|latakia|homs/i.test(blob)
   ) {
-    return 'syria';
+    return 'lebanon';
   }
   if (
     /לבנון|חיזבאללה|hezb|hezbollah|lebanon|דרום לבנון|ביירות|beirut|טריפולי|צפון לבנון|jbeil|bint jbeil|marjayoun|נבטיה|\btyr\b|\bsidon\b/i.test(
@@ -61,7 +61,7 @@ function matchExplicitThreatAxisInBlob(blob) {
     return 'gaza';
   }
   if (/(מסוריה|מ\s*סוריה|ממרחב\s+דמשק|ממרחב\s+חומס|ממרחב\s+דרעא|שוגר\s+מסוריה|שיגור\s+מסוריה|ירי\s+מסוריה|שיגורים\s+מסוריה|יציאה\s+מסוריה|יציאות\s+מסוריה|\bfrom syria\b|\bfrom damascus\b)/i.test(text)) {
-    return 'syria';
+    return 'lebanon';
   }
 
   return null;

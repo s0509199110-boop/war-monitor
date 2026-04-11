@@ -32,8 +32,8 @@ function normalizeLaunchAxis(s) {
   if (['yemen', 'houthi', 'houthis', 'sanaa', 'ansarallah'].includes(x)) return 'yemen';
   if (['lebanon', 'hezbollah', 'hizbullah', 'beirut'].includes(x)) return 'lebanon';
   if (['gaza', 'hamas', 'gaza strip'].includes(x)) return 'gaza';
-  if (['syria', 'damascus'].includes(x)) return 'syria';
-  if (['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(x)) return x;
+  if (['syria', 'damascus'].includes(x)) return 'lebanon';
+  if (['iran', 'iraq', 'yemen', 'lebanon', 'gaza'].includes(x)) return x;
   return 'unknown';
 }
 

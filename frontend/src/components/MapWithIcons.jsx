@@ -26,6 +26,12 @@ const MapWithIcons = ({ socket: propSocket }) => {
   const [intercepts, setIntercepts] = useState([]);
   const [impacts, setImpacts] = useState([]);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  
+  // Track missile waves - group alerts within 10 seconds into one missile
+  const [missileWaveId, setMissileWaveId] = useState(0);
+  const [pendingTargets, setPendingTargets] = useState([]);
+  const [lastMissileLaunchTime, setLastMissileLaunchTime] = useState(0);
+  const pendingTimerRef = useRef(null);
 
   const socketRef = useRef(propSocket);
   useEffect(() => { socketRef.current = propSocket; }, [propSocket]);
@@ -47,6 +53,29 @@ const MapWithIcons = ({ socket: propSocket }) => {
 
     rafId = requestAnimationFrame(tick);
     return () => { if (rafId) cancelAnimationFrame(rafId); };
+  }, []);
+
+  // ==========================================
+  // Cleanup: Remove Iran-origin missiles only (Lebanon→center/south Israel must stay visible)
+  // ==========================================
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveMissiles((prev) => {
+        const filtered = prev.filter((m) => {
+          if (m.sourceRegion === 'iran') {
+            console.log('[Cleanup] Removing Iran missile:', m.id, 'region:', m.sourceRegion);
+            return false;
+          }
+          return true;
+        });
+        if (filtered.length !== prev.length) {
+          console.log('[Cleanup] Removed', prev.length - filtered.length, 'invalid missiles');
+        }
+        return filtered;
+      });
+    }, 2000); // Check every 2 seconds
+    
+    return () => clearInterval(interval);
   }, []);
 
   // ==========================================
@@ -75,27 +104,119 @@ const MapWithIcons = ({ socket: propSocket }) => {
           threatType: data.threatType || 'missile'
         }];
       });
+      
+      // Add to pending targets for grouped missile launch
+      const now = Date.now();
+      const timeSinceLastLaunch = now - lastMissileLaunchTime;
+      
+      // If more than 1 minute since last launch, or no pending targets, start new wave
+      if (timeSinceLastLaunch > 60000 || pendingTargets.length === 0) {
+        setPendingTargets([{ cityName: data.cityName, position: coords, timestamp: now }]);
+        setMissileWaveId((prev) => prev + 1);
+        
+        // Clear any existing timer
+        if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
+        
+        // Launch missile after 3 seconds to collect all simultaneous alerts
+        pendingTimerRef.current = setTimeout(() => {
+          launchGroupedMissile();
+        }, 3000);
+      } else {
+        // Add to current wave
+        setPendingTargets((prev) => [...prev, { cityName: data.cityName, position: coords, timestamp: now }]);
+      }
+    };
+    
+    const launchGroupedMissile = () => {
+      setPendingTargets((targets) => {
+        if (targets.length === 0) return [];
+        
+        const now = Date.now();
+        const waveId = `wave-${missileWaveId}-${now}`;
+        const source = [35.53, 33.25]; // South Lebanon border coordinates (near Fatma Gate/Metula area)
+        
+        // Calculate split point - just before reaching targets (90% of the way)
+        // This makes the split happen much closer to the cities
+        const avgLng = targets.reduce((sum, t) => sum + t.position[0], 0) / targets.length;
+        const avgLat = targets.reduce((sum, t) => sum + t.position[1], 0) / targets.length;
+        const splitPoint = [
+          source[0] + (avgLng - source[0]) * 0.90,
+          source[1] + (avgLat - source[1]) * 0.90
+        ];
+        
+        // Create main missile
+        const mainMissile = {
+          id: waveId,
+          cityName: targets.length > 1 ? `${targets.length} ערים` : targets[0].cityName,
+          source,
+          target: splitPoint, // Main missile goes to split point
+          splitPoint,
+          targets: targets, // All targets for small missiles
+          sourceRegion: 'lebanon',
+          sourceLocation: 'לבנון',
+          displayFlightMs: 15000, // 15 seconds to split point
+          displayElapsedMs: 0,
+          clientStartTime: now,
+          estimatedDistanceKm: getDistanceKm(source, splitPoint),
+          threatType: 'missile',
+          phase: 'launch',
+          status: 'inbound',
+          timestamp: now,
+          isMainMissile: true,
+          hasSplit: targets.length > 1,
+          opacity: 1,
+          fading: false
+        };
+        
+        setActiveMissiles((prev) => [...prev, mainMissile]);
+        setLastMissileLaunchTime(now);
+        
+        console.log('[launchGroupedMissile] Launched missile for', targets.length, 'cities, wave:', waveId);
+        return [];
+      });
     };
 
     const onRealTimeMissile = (data) => {
+      console.log('[onRealTimeMissile] Received:', data.id, 'source:', data.source, 'target:', data.target, 'sourceRegion:', data.sourceRegion);
       if (!data?.id) return;
+      
+      const region = data.sourceRegion || 'unknown';
+      if (region === 'iran') {
+        console.log('[onRealTimeMissile] BLOCKED - Iran missile rejected:', data.id, 'region:', region);
+        return;
+      }
+      
       const source = data.source || data.sourcePosition;
       const target = data.target || data.targetPosition;
-      if (!source || !target) return;
+      if (!source || !target) {
+        console.log('[onRealTimeMissile] Missing source or target, skipping');
+        return;
+      }
 
       setActiveMissiles((prev) => {
-        if (prev.some((m) => m.id === data.id)) return prev;
+        if (prev.some((m) => m.id === data.id)) {
+          console.log('[onRealTimeMissile] Missile already exists:', data.id);
+          return prev;
+        }
+        // Calculate accurate flight time based on distance
+        const calculatedFlightMs = calculateFlightTimeMs(source, target);
+        // Start missile from the beginning (progress = 0) at the source
+        const clientStartTime = Date.now();
+        const flightMs = calculatedFlightMs || data.displayFlightMs || data.flightMs || 30000;
+        const distanceKm = getDistanceKm(source, target);
+        console.log('[onRealTimeMissile] Adding missile:', data.id, 'distance:', distanceKm.toFixed(1), 'km', 'flightTime:', (flightMs/1000).toFixed(1), 'sec');
         return [...prev, {
           ...data,
           id: data.id,
           cityName: data.cityName || 'unknown',
           source,
           target,
-          sourceRegion: data.sourceRegion || null,
-          sourceLocation: data.sourceLocation || 'מקור משוער',
-          displayFlightMs: data.displayFlightMs || data.flightMs || 30000,
-          displayElapsedMs: data.displayElapsedMs || 0,
-          estimatedDistanceKm: data.estimatedDistanceKm || null,
+          sourceRegion: data.sourceRegion || 'lebanon', // Default to Lebanon
+          sourceLocation: data.sourceLocation || 'לבנון',
+          displayFlightMs: flightMs,
+          displayElapsedMs: 0, // Start from 0 to show missile from source
+          clientStartTime, // Track when client first saw this missile
+          estimatedDistanceKm: distanceKm,
           threatType: data.threatType || 'missile',
           phase: data.phase || 'launch',
           status: data.status || 'inbound',
@@ -154,10 +275,20 @@ const MapWithIcons = ({ socket: propSocket }) => {
           salvoIndex: data.salvoIndex
         };
         setImpacts((prev) => [...prev, marker]);
+        
+        // For cluster missiles: keep visible until Oref sends clear event
+        // For regular missiles: fade out after 3 seconds
+        const isCluster = data.isCluster || false;
+        const timeoutMs = isCluster ? 60000 : 3000; // Cluster: 60 sec, Regular: 3 sec
+        
         setTimeout(() => {
           setImpacts((prev) => prev.filter((i) => i.id !== marker.id));
-          setActiveMissiles((prev) => prev.filter((m) => m.id !== data.id));
-        }, 3000);
+          if (!isCluster) {
+            // Only remove regular missiles automatically
+            setActiveMissiles((prev) => prev.filter((m) => m.id !== data.id));
+          }
+          // Cluster missiles will be removed by 'clear_city_alert' event from Oref
+        }, timeoutMs);
       }
     };
 
@@ -232,9 +363,10 @@ const MapWithIcons = ({ socket: propSocket }) => {
   const formatSourceRegion = useCallback((region) => {
     const labels = {
       lebanon: 'לבנון', syria: 'סוריה', gaza: 'עזה',
-      yemen: 'תימן', iraq: 'עיראק', iran: 'איראן'
+      yemen: 'תימן', iraq: 'עיראק'
+      // Iran disabled: iran: 'איראן'
     };
-    return labels[region] || 'מקור משוער';
+    return labels[region] || 'לבנון'; /* Default to Lebanon */
   }, []);
 
   const getSourcePalette = useCallback((region, phase) => {
@@ -243,36 +375,143 @@ const MapWithIcons = ({ socket: propSocket }) => {
     }
     const palettes = {
       lebanon: { primary: [244, 203, 74], secondary: [255, 228, 125], glow: [255, 244, 214] },
-      syria: { primary: [255, 166, 77], secondary: [255, 204, 138], glow: [255, 234, 214] },
+      syria: { primary: [255, 160, 0], secondary: [255, 202, 96], glow: [255, 236, 199] },
       gaza: { primary: [255, 112, 99], secondary: [255, 169, 150], glow: [255, 225, 220] },
       yemen: { primary: [96, 205, 255], secondary: [154, 228, 255], glow: [224, 246, 255] },
-      iraq: { primary: [255, 128, 191], secondary: [255, 190, 223], glow: [255, 232, 243] },
-      iran: { primary: [255, 72, 72], secondary: [255, 148, 148], glow: [255, 226, 226] }
+      iraq: { primary: [255, 128, 191], secondary: [255, 190, 223], glow: [255, 232, 243] }
     };
     return palettes[region] || { primary: [255, 100, 100], secondary: [255, 170, 100], glow: [255, 230, 200] };
   }, []);
+
+  // Calculate distance between two coordinates (Haversine formula) - result in km
+  const getDistanceKm = useCallback((pos1, pos2) => {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const R = 6371; // Earth's radius in km
+    const lat1 = toRad(pos1[1]);
+    const lat2 = toRad(pos2[1]);
+    const deltaLat = toRad(pos2[1] - pos1[1]);
+    const deltaLng = toRad(pos2[0] - pos1[0]);
+    
+    const a = Math.sin(deltaLat / 2) ** 2 +
+              Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    
+    return R * c;
+  }, []);
+
+  // Calculate flight time in ms based on distance from Lebanon
+  // Kiryat Shmona (closest): 10 seconds
+  // Tel Aviv (farthest): 90 seconds (1.5 minutes)
+  const calculateFlightTimeMs = useCallback((source, target) => {
+    const distanceKm = getDistanceKm(source, target);
+    
+    // Base times for Lebanon
+    // ~5km to Kiryat Shmona = 10 seconds
+    // ~130km to Tel Aviv = 90 seconds
+    // Formula: time increases with distance
+    const minTime = 10000; // 10 seconds minimum
+    const maxTime = 90000; // 90 seconds maximum
+    const minDist = 5;    // 5km (Kiryat Shmona area)
+    const maxDist = 140;  // 140km (Tel Aviv area)
+    
+    // Linear interpolation between min and max time based on distance
+    if (distanceKm <= minDist) return minTime;
+    if (distanceKm >= maxDist) return maxTime;
+    
+    const ratio = (distanceKm - minDist) / (maxDist - minDist);
+    return Math.round(minTime + ratio * (maxTime - minTime));
+  }, [getDistanceKm]);
 
   // ==========================================
   // Compute animated missile positions
   // ==========================================
   const animatedMissiles = useMemo(() => {
-    return activeMissiles.map((missile) => {
-      const elapsed = currentTime - missile.timestamp;
-      const totalRemaining = missile.displayFlightMs - missile.displayElapsedMs;
-      const progress = totalRemaining > 0
-        ? Math.min(1, Math.max(0, missile.displayElapsedMs + elapsed) / missile.displayFlightMs)
-        : Math.min(1, Math.max(0, elapsed / (missile.displayFlightMs || 30000)));
+    const result = [];
+    
+    activeMissiles.forEach((missile) => {
+      // Use client start time if available (for missiles just added), otherwise use timestamp
+      const startTime = missile.clientStartTime || missile.timestamp;
+      const elapsed = currentTime - startTime;
+      const flightMs = missile.displayFlightMs || 30000;
+      
+      // Calculate progress from 0 to 1 based on elapsed time since client saw the missile
+      const progress = Math.min(1, Math.max(0, elapsed / flightMs));
 
       const currentPosition = getGreatCirclePoint(missile.source, missile.target, progress);
 
-      return {
-        ...missile,
-        progress,
-        currentPosition,
-        opacity: missile.fading ? 0 : (missile.opacity ?? 1)
-      };
+      // Main missile - show only until it reaches split point
+      if (missile.isMainMissile && !missile.hasSplit) {
+        if (progress < 1) {
+          result.push({
+            ...missile,
+            progress,
+            currentPosition,
+            opacity: missile.fading ? 0 : (missile.opacity ?? 1)
+          });
+        }
+        // When main missile reaches split point, create small missiles for each target
+        else if (missile.targets && missile.targets.length > 0 && !missile.splitTriggered) {
+          missile.splitTriggered = true;
+          missile.fading = true;
+          
+          // Create small missiles from split point to each city
+          missile.targets.forEach((target, idx) => {
+            const smallMissileId = `${missile.id}-small-${idx}`;
+            const distanceToTarget = getDistanceKm(missile.splitPoint, target.position);
+            const timeToTarget = calculateFlightTimeMs(missile.splitPoint, target.position);
+            
+            result.push({
+              id: smallMissileId,
+              cityName: target.cityName,
+              source: missile.splitPoint,
+              target: target.position,
+              sourceRegion: 'lebanon',
+              displayFlightMs: timeToTarget,
+              displayElapsedMs: 0,
+              clientStartTime: currentTime,
+              estimatedDistanceKm: distanceToTarget,
+              threatType: 'missile',
+              phase: 'split',
+              status: 'inbound',
+              timestamp: currentTime,
+              isSmallMissile: true,
+              parentWaveId: missile.id,
+              opacity: 1,
+              fading: false,
+              progress: 0,
+              currentPosition: missile.splitPoint
+            });
+          });
+        }
+      }
+      // Small missiles (after split) - animate from split point to target
+      else if (missile.isSmallMissile) {
+        const smallElapsed = currentTime - (missile.clientStartTime || missile.timestamp);
+        const smallProgress = Math.min(1, Math.max(0, smallElapsed / (missile.displayFlightMs || 10000)));
+        const smallPosition = getGreatCirclePoint(missile.source, missile.target, smallProgress);
+        
+        if (smallProgress < 1) {
+          result.push({
+            ...missile,
+            progress: smallProgress,
+            currentPosition: smallPosition,
+            opacity: missile.fading ? 0 : (missile.opacity ?? 1)
+          });
+        }
+      }
+      // Regular missiles (not grouped)
+      else {
+        result.push({
+          ...missile,
+          progress,
+          currentPosition,
+          opacity: missile.fading ? 0 : (missile.opacity ?? 1)
+        });
+      }
     });
-  }, [activeMissiles, currentTime, getGreatCirclePoint]);
+    
+    return result;
+  }, [activeMissiles, currentTime, getGreatCirclePoint, getDistanceKm, calculateFlightTimeMs]);
 
   const leadThreat = useMemo(() => {
     const active = animatedMissiles.filter((m) => m.progress < 1 && !m.fading);
@@ -365,28 +604,38 @@ const MapWithIcons = ({ socket: propSocket }) => {
 
   // Layer 2: Missile trajectory arcs (source → target)
   const missileArcLayer = useMemo(() => {
+    // DEBUG: Log missile details
+    const activeMissiles = animatedMissiles.filter(m => m.progress < 1);
+    console.log('[Missile Layer] Total:', animatedMissiles.length, 'Active:', activeMissiles.length);
+    if (animatedMissiles.length > 0) {
+      console.log('[Missile Sample]', animatedMissiles[0].id, 'progress:', animatedMissiles[0].progress, 'source:', animatedMissiles[0].source, 'target:', animatedMissiles[0].target);
+    }
+    // For debugging: show all missiles, not just progress < 1
+    const dataToShow = activeMissiles.length > 0 ? activeMissiles : animatedMissiles;
     return new ArcLayer({
       id: 'missile-arc-layer',
-      data: animatedMissiles.filter((m) => m.progress < 1),
+      data: dataToShow,
       getSourcePosition: (d) => d.source,
       getTargetPosition: (d) => d.target,
       getSourceColor: (d) => {
         const base = getSourcePalette(d.sourceRegion, d.phase).primary;
-        return [base[0], base[1], base[2], Math.round((d.opacity ?? 1) * 210)];
+        // Bright yellow/orange color like Iran War Monitor
+        return [255, 200, 50, Math.round((d.opacity ?? 1) * 255)];
       },
       getTargetColor: (d) => {
         const base = getSourcePalette(d.sourceRegion, d.phase).secondary;
-        return [base[0], base[1], base[2], Math.round((d.opacity ?? 1) * 235)];
+        // Bright red/orange at target
+        return [255, 100, 50, Math.round((d.opacity ?? 1) * 255)];
       },
-      getWidth: 2.5,
-      widthMinPixels: 1,
-      widthMaxPixels: 4,
+      getWidth: 4,
+      widthMinPixels: 3,
+      widthMaxPixels: 6,
       greatCircle: true,
-      getHeight: 0.15,
+      getHeight: 0.2,
       pickable: true,
       autoHighlight: true,
       transitions: { opacity: 2000 },
-      opacity: 0.92,
+      opacity: 1,
       onHover: (info) => {
         if (!info.object) return null;
         const remainingMs = Math.max(0,
@@ -411,46 +660,168 @@ const MapWithIcons = ({ socket: propSocket }) => {
     });
   }, [animatedMissiles, currentTime, formatSourceRegion, getSourcePalette]);
 
-  // Layer 3: Animated missile head (moving dot)
-  const missileHeadLayer = useMemo(() => {
-    return new ScatterplotLayer({
-      id: 'missile-head-layer',
-      data: animatedMissiles.filter((m) => m.progress < 1 && m.progress > 0),
+  // Calculate angle for missile based on trajectory
+  const getMissileAngle = useCallback((missile) => {
+    const [sx, sy] = missile.source;
+    const [tx, ty] = missile.target;
+    // Calculate bearing from source to target
+    const dx = tx - sx;
+    const dy = ty - sy;
+    const angleRad = Math.atan2(dy, dx);
+    const angleDeg = (angleRad * 180) / Math.PI;
+    // Adjust for emoji orientation (pointing right = 0 degrees)
+    return angleDeg;
+  }, []);
+
+  // Layer 2b: Glow effect for missile trajectory
+  const missileGlowLayer = useMemo(() => {
+    const dataToShow = activeMissiles.length > 0 ? activeMissiles : animatedMissiles;
+    return new ArcLayer({
+      id: 'missile-glow-layer',
+      data: dataToShow,
+      getSourcePosition: (d) => d.source,
+      getTargetPosition: (d) => d.target,
+      getSourceColor: [255, 200, 50, 80],
+      getTargetColor: [255, 100, 50, 80],
+      getWidth: 12,
+      widthMinPixels: 8,
+      widthMaxPixels: 20,
+      greatCircle: true,
+      getHeight: 0.2,
+      pickable: false,
+      opacity: 0.6
+    });
+  }, [animatedMissiles, activeMissiles]);
+
+  // Layer 3: Main missile head (shows grouped missiles AND regular backend missiles)
+  const mainMissileLayer = useMemo(() => {
+    const missileData = animatedMissiles.filter((m) => {
+      // Show all missiles that are: 1) in progress, 2) not small/cluster missiles
+      const inProgress = m.progress >= 0 && m.progress < 1;
+      const isNotSmall = !m.isSmallMissile;
+      return inProgress && isNotSmall;
+    });
+    console.log('[mainMissileLayer] Showing', missileData.length, 'missiles');
+    return new IconLayer({
+      id: 'main-missile-layer',
+      data: missileData,
       getPosition: (d) => d.currentPosition,
-      getFillColor: (d) => {
-        const base = getSourcePalette(d.sourceRegion, d.phase).primary;
-        const pulse = Math.sin(currentTime / 120) * 30;
-        return [
-          Math.min(255, base[0] + pulse),
-          Math.min(255, base[1] + pulse),
-          base[2],
-          Math.round((d.opacity ?? 1) * 245)
-        ];
+      getIcon: (d) => {
+        // Different icons for missiles vs UAVs
+        const isUAV = d.threatType === 'uav';
+        // ✈️ = airplane for UAV, 🚀 = rocket for missiles
+        const icon = isUAV ? '✈️' : '🚀';
+        return {
+          url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><text x="16" y="24" font-size="20" text-anchor="middle">${icon}</text></svg>`),
+          width: 32,
+          height: 32,
+          anchorY: 16
+        };
       },
-      getLineColor: (d) => {
-        const glow = getSourcePalette(d.sourceRegion, d.phase).glow;
-        return [glow[0], glow[1], glow[2], Math.round((d.opacity ?? 1) * 160)];
-      },
-      getRadius: 4000,
-      radiusMinPixels: 3,
-      radiusMaxPixels: 9,
-      stroked: true,
-      filled: true,
-      lineWidthMinPixels: 1,
+      getSize: (d) => d.isMainMissile ? 65 : 55,
+      sizeUnits: 'pixels',
+      getAngle: (d) => getMissileAngle(d),
+      billboard: false,
       pickable: true,
       onHover: (info) => {
         if (!info.object) return null;
         const remainingMs = Math.max(0,
-          info.object.displayFlightMs - info.object.displayElapsedMs - (currentTime - info.object.timestamp));
+          info.object.displayFlightMs - (currentTime - (info.object.clientStartTime || info.object.timestamp)));
         const etaLabel = remainingMs >= 60000
           ? `${Math.ceil(remainingMs / 60000)} דק'`
           : `${Math.ceil(remainingMs / 1000)} שנ'`;
         const pal = getSourcePalette(info.object.sourceRegion, info.object.phase);
+        const isUAV = info.object.threatType === 'uav';
+        const typeLabel = isUAV ? '🛸 כלי טייס בלתי מאויש' : '🚀 טיל בליסטי';
+        const speedLabel = isUAV ? 'מהירות: 130 קמ"ש' : 'מהירות: בליסטית';
         return {
           html: `
             <div style="background:rgba(6,10,16,0.94);border:1px solid rgba(${pal.primary.join(',')},0.65);padding:10px 12px;border-radius:6px;color:white;font-size:12px;min-width:180px;">
-              <div style="font-weight:700;color:rgb(${pal.primary.join(',')});margin-bottom:6px;">טיל בתנועה</div>
+              <div style="font-weight:700;color:rgb(${pal.primary.join(',')});margin-bottom:6px;">${typeLabel}</div>
               <div>מקור: ${formatSourceRegion(info.object.sourceRegion)}</div>
+              <div>יעד: ${info.object.cityName || 'לא ידוע'}</div>
+              <div>${speedLabel}</div>
+              <div>זמן הגעה: ${etaLabel}</div>
+              <div>התקדמות: ${Math.round(info.object.progress * 100)}%</div>
+              ${info.object.isCluster ? '<div style="color:#ff8800;">⚠️ טיל מצרר</div>' : ''}
+            </div>
+          `
+        };
+      }
+    });
+  }, [animatedMissiles, currentTime, formatSourceRegion, getSourcePalette, getMissileAngle]);
+
+  // Layer 3b: Small missiles (cluster munition bomblets after split)
+  const smallMissileLayer = useMemo(() => {
+    return new IconLayer({
+      id: 'small-missile-layer',
+      data: animatedMissiles.filter((m) => m.progress < 1 && m.progress >= 0 && m.isSmallMissile),
+      getPosition: (d) => d.currentPosition,
+      getIcon: (d) => {
+        // Random scatter effect based on missile ID
+        const seed = d.id ? d.id.split('').reduce((a, b) => a + b.charCodeAt(0), 0) : 0;
+        const scatterX = (seed % 7) - 3;
+        const scatterY = (seed % 5) - 2;
+        const rotation = (seed % 30) - 15;
+        
+        return {
+          url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 20" width="30" height="20">
+              <defs>
+                <linearGradient id="bombGrad${d.id}" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style="stop-color:#444;stop-opacity:1" />
+                  <stop offset="50%" style="stop-color:#222;stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:#111;stop-opacity:1" />
+                </linearGradient>
+                <filter id="bombGlow${d.id}" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="1.5" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+              </defs>
+              <g transform="rotate(${rotation} 15 10) translate(${scatterX} ${scatterY})">
+                <!-- Smoke trail -->
+                <ellipse cx="5" cy="10" rx="8" ry="3" fill="#666" opacity="0.4">
+                  <animate attributeName="rx" values="8;10;8" dur="0.2s" repeatCount="indefinite"/>
+                  <animate attributeName="opacity" values="0.4;0.2;0.4" dur="0.3s" repeatCount="indefinite"/>
+                </ellipse>
+                <!-- Bomblet body - cylindrical with fins -->
+                <rect x="8" y="7" width="14" height="6" rx="2" fill="url(#bombGrad${d.id})" stroke="#111" stroke-width="0.5" filter="url(#bombGlow${d.id})"/>
+                <!-- Front cone -->
+                <path d="M 22 7 L 27 10 L 22 13 Z" fill="#333" stroke="#111" stroke-width="0.5"/>
+                <!-- Stabilizer fins -->
+                <path d="M 12 7 L 10 4 L 16 7 Z" fill="#555"/>
+                <path d="M 12 13 L 10 16 L 16 13 Z" fill="#555"/>
+                <!-- Small spark/fire at back -->
+                <circle cx="8" cy="10" r="2" fill="#ff6600" opacity="0.7">
+                  <animate attributeName="r" values="2;3;2" dur="0.1s" repeatCount="indefinite"/>
+                </circle>
+              </g>
+            </svg>
+          `),
+          width: 30,
+          height: 20,
+          anchorY: 10
+        };
+      },
+      getSize: (d) => 28 + ((d.id ? d.id.length : 0) % 8), // Vary size slightly for visual variety
+      sizeUnits: 'pixels',
+      getAngle: (d) => getMissileAngle(d),
+      billboard: false,
+      pickable: true,
+      onHover: (info) => {
+        if (!info.object) return null;
+        const remainingMs = Math.max(0,
+          info.object.displayFlightMs - (currentTime - (info.object.clientStartTime || info.object.timestamp)));
+        const etaLabel = remainingMs >= 60000
+          ? `${Math.ceil(remainingMs / 60000)} דק'`
+          : `${Math.ceil(remainingMs / 1000)} שנ'`;
+        return {
+          html: `
+            <div style="background:rgba(6,10,16,0.94);border:1px solid rgba(255,68,68,0.65);padding:10px 12px;border-radius:6px;color:white;font-size:12px;min-width:180px;">
+              <div style="font-weight:700;color:rgb(255,68,68);margin-bottom:6px;">🚀 טיל מפוצל</div>
               <div>יעד: ${info.object.cityName || 'לא ידוע'}</div>
               <div>זמן הגעה: ${etaLabel}</div>
               <div>התקדמות: ${Math.round(info.object.progress * 100)}%</div>
@@ -459,7 +830,7 @@ const MapWithIcons = ({ socket: propSocket }) => {
         };
       }
     });
-  }, [animatedMissiles, currentTime, formatSourceRegion, getSourcePalette]);
+  }, [animatedMissiles, currentTime, getMissileAngle]);
 
   // Layer 4: Wave labels
   const waveLabelLayer = useMemo(() => {
@@ -485,6 +856,178 @@ const MapWithIcons = ({ socket: propSocket }) => {
       pickable: false
     });
   }, [waveLabels, getSourcePalette]);
+
+  // Generate cluster sub-missiles for visualization
+  const clusterMissiles = useMemo(() => {
+    const clusters = [];
+    animatedMissiles.forEach((missile) => {
+      if (missile.isCluster && missile.progress < 0.95) {
+        // Create 3-5 sub-missiles around the main missile
+        const subCount = 4;
+        for (let i = 0; i < subCount; i++) {
+          const angle = (i / subCount) * 2 * Math.PI;
+          const radius = 0.003; // Small offset from main missile
+          const [mainLng, mainLat] = missile.currentPosition;
+          const offsetLng = mainLng + Math.cos(angle) * radius;
+          const offsetLat = mainLat + Math.sin(angle) * radius;
+          clusters.push({
+            id: `${missile.id}-sub-${i}`,
+            position: [offsetLng, offsetLat],
+            parentId: missile.id,
+            sourceRegion: missile.sourceRegion,
+            phase: missile.phase,
+            opacity: 0.7
+          });
+        }
+      }
+    });
+    return clusters;
+  }, [animatedMissiles]);
+
+  // Layer 4b: Cluster sub-missiles (small bombs)
+  const clusterLayer = useMemo(() => {
+    return new IconLayer({
+      id: 'cluster-layer',
+      data: clusterMissiles,
+      getPosition: (d) => d.position,
+      getIcon: () => ({
+        url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <text x="12" y="18" font-size="14" text-anchor="middle">💣</text>
+          </svg>
+        `),
+        width: 24,
+        height: 24,
+        anchorY: 12
+      }),
+      getSize: () => 20,
+      sizeUnits: 'pixels',
+      getAngle: () => Math.random() * 360, // Random rotation for scattered effect
+      billboard: false,
+      pickable: false
+    });
+  }, [clusterMissiles]);
+
+  // Generate small missile arcs (from split point to each city)
+  const smallMissileArcs = useMemo(() => {
+    const smallArcs = [];
+    animatedMissiles.forEach((missile) => {
+      // Show arc for small missiles from their source (split point) to target
+      if (missile.isSmallMissile && missile.progress < 1) {
+        smallArcs.push({
+          id: `${missile.id}-arc`,
+          source: missile.source,
+          target: missile.target,
+          cityName: missile.cityName,
+          sourceRegion: 'lebanon',
+          opacity: 0.8
+        });
+      }
+    });
+    return smallArcs;
+  }, [animatedMissiles]);
+
+  // Layer 4b: Small missile arcs
+  const smallMissileArcLayer = useMemo(() => {
+    return new ArcLayer({
+      id: 'small-missile-arc-layer',
+      data: smallMissileArcs,
+      getSourcePosition: (d) => d.source,
+      getTargetPosition: (d) => d.target,
+      getSourceColor: [255, 150, 50, 200],
+      getTargetColor: [255, 80, 50, 200],
+      getWidth: 2,
+      widthMinPixels: 2,
+      widthMaxPixels: 3,
+      greatCircle: true,
+      getHeight: 0.1,
+      pickable: false,
+      opacity: 0.8
+    });
+  }, [smallMissileArcs]);
+
+  // Generate split explosion effects at split points
+  const splitExplosions = useMemo(() => {
+    const explosions = [];
+    activeMissiles.forEach((missile) => {
+      // Show explosion when main missile has just split
+      if (missile.isMainMissile && missile.splitTriggered && !missile.explosionShown) {
+        missile.explosionShown = true;
+        explosions.push({
+          id: `${missile.id}-split-explosion`,
+          position: missile.splitPoint,
+          timestamp: Date.now(),
+          sourceRegion: missile.sourceRegion
+        });
+      }
+    });
+    return explosions;
+  }, [activeMissiles]);
+
+  // Layer 4c: Split explosion effect
+  const splitExplosionLayer = useMemo(() => {
+    return new ScatterplotLayer({
+      id: 'split-explosion-layer',
+      data: splitExplosions,
+      getPosition: (d) => d.position,
+      getFillColor: [255, 200, 50, 200],
+      getLineColor: [255, 100, 50, 255],
+      getRadius: 3500,
+      radiusMinPixels: 8,
+      radiusMaxPixels: 25,
+      stroked: true,
+      filled: true,
+      lineWidthMinPixels: 2,
+      pickable: false,
+      opacity: 0.9
+    });
+  }, [splitExplosions]);
+
+  // Generate branching arcs for multi-city targets
+  const branchArcs = useMemo(() => {
+    const branches = [];
+    animatedMissiles.forEach((missile) => {
+      if (missile.branchTargets && missile.branchTargets.length > 1 && missile.progress < 0.9) {
+        // Show branches from main missile to each target
+        missile.branchTargets.forEach((target, idx) => {
+          if (idx === 0) return; // Skip first as it's the main target
+          branches.push({
+            id: `${missile.id}-branch-${idx}`,
+            source: missile.currentPosition,
+            target: target.position,
+            sourceRegion: missile.sourceRegion,
+            phase: missile.phase,
+            opacity: 0.6,
+            branchIndex: idx
+          });
+        });
+      }
+    });
+    return branches;
+  }, [animatedMissiles]);
+
+  // Layer 4c: Branching missile arcs
+  const branchArcLayer = useMemo(() => {
+    return new ArcLayer({
+      id: 'branch-arc-layer',
+      data: branchArcs,
+      getSourcePosition: (d) => d.source,
+      getTargetPosition: (d) => d.target,
+      getSourceColor: (d) => {
+        const base = getSourcePalette(d.sourceRegion, d.phase).secondary;
+        return [base[0], base[1], base[2], Math.round(d.opacity * 150)];
+      },
+      getTargetColor: (d) => {
+        const base = getSourcePalette(d.sourceRegion, d.phase).glow;
+        return [base[0], base[1], base[2], Math.round(d.opacity * 100)];
+      },
+      getWidth: () => 2,
+      widthMinPixels: 1,
+      widthMaxPixels: 3,
+      greatCircle: false,
+      pickable: false
+    });
+  }, [branchArcs, getSourcePalette]);
 
   // Layer 5: Intercept markers
   const interceptLayer = useMemo(() => {
@@ -579,10 +1122,15 @@ const MapWithIcons = ({ socket: propSocket }) => {
 
   const layers = [
     cityAlertLayer,
-    missileArcLayer,
+    missileGlowLayer,       // Glow effect behind trajectory
+    missileArcLayer,        // Main trajectory line
+    smallMissileArcLayer,   // Arcs for small missiles after split
+    branchArcLayer,         // Branching missiles to multiple cities
     waveLabelLayer,
     iconLayer,
-    missileHeadLayer,
+    mainMissileLayer,       // Main missile (before split)
+    smallMissileLayer,      // Small missiles (after split to each city)
+    clusterLayer,           // Cluster bomb sub-missiles
     interceptLayer,
     impactPulseLayer
   ];
@@ -612,13 +1160,17 @@ const MapWithIcons = ({ socket: propSocket }) => {
         <div>🛡️ יירוטים: {intercepts.length}</div>
         <div>💥 פגיעות: {impacts.length}</div>
         <div>📡 ישויות: {mapEntities.length}</div>
-        {leadThreat && (
+        {leadThreat ? (
           <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #333' }}>
             <div style={{ color: '#f4cb4a' }}>מקור: {leadThreat.sourceRegion}</div>
             <div>זמן הגעה: {leadThreat.etaLabel}</div>
             <div>יעד: {leadThreat.cityName}</div>
             {leadThreat.distanceKm && <div>טווח: {leadThreat.distanceKm} ק"מ</div>}
             <div>גל: {leadThreat.waveLabel}</div>
+          </div>
+        ) : (
+          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #333', color: '#666' }}>
+            <div>ממתין למקור האיום...</div>
           </div>
         )}
       </div>

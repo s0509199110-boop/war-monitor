@@ -688,7 +688,7 @@ function inferSummaryNewsRegion(article) {
   if (!text) return null;
   if (/איראן|iran|טהראן|tehran/.test(text)) return 'iran';
   if (/לבנון|lebanon|חיזבאללה|hezbollah/.test(text)) return 'lebanon';
-  if (/סוריה|syria|דמשק|damascus/.test(text)) return 'syria';
+  if (/סוריה|syria|דמשק|damascus/.test(text)) return 'lebanon';
   if (/עזה|gaza|חמאס|hamas/.test(text)) return 'gaza';
   if (/עיראק|iraq/.test(text)) return 'iraq';
   if (/תימן|yemen|חותי|houthi/.test(text)) return 'yemen';
@@ -713,9 +713,11 @@ function inferSummaryFlightRegion(flight) {
   const lng = Number(flight?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat >= 32 && lat <= 37 && lng >= 34 && lng <= 37) return 'lebanon';
-  if (lat >= 31 && lat <= 37 && lng > 37 && lng <= 42) return 'syria';
+  if (lat >= 31 && lat <= 37 && lng > 37 && lng <= 42) return 'lebanon';
   if (lat >= 24 && lat <= 33 && lng >= 43 && lng <= 49) return 'iraq';
-  if (lat >= 24 && lat <= 40 && lng > 49 && lng <= 64) return 'iran';
+  // DISABLED: Iran missiles disabled per user request
+  // if (lat >= 24 && lat <= 40 && lng > 49 && lng <= 64) return 'iran';
+  if (lat >= 24 && lat <= 40 && lng > 49 && lng <= 64) return 'lebanon'; // Fallback to Lebanon
   if (lat >= 12 && lat <= 19 && lng >= 41 && lng <= 55) return 'yemen';
   if (lat >= 30 && lat <= 33 && lng >= 34 && lng <= 35.7) return 'gaza';
   if (lat >= 29 && lat <= 34.8 && lng >= 34 && lng <= 35.9) return 'israel';
@@ -1864,8 +1866,8 @@ const cityClearConfirmPolls = new Map();
 /** פיזור שליחות Socket ללקוח — מונע מאות הודעות בפריים אחד וקריסת דפדפן בשיגור המוני */
 let orefClientSocketEmitSlot = 0;
 const OREF_CLIENT_SOCKET_EMIT_GAP_MS = Math.max(
-  40,
-  Number(process.env.OREF_CLIENT_SOCKET_EMIT_GAP_MS) || 72
+  20,
+  Number(process.env.OREF_CLIENT_SOCKET_EMIT_GAP_MS) || 36
 );
 function resetOrefClientSocketEmitStagger() {
   orefClientSocketEmitSlot = 0;
@@ -1890,11 +1892,11 @@ const OREF_HTTP_TIMEOUT_MS = (() => {
   if (Number.isFinite(n) && n >= 1500 && n <= 60_000) return Math.floor(n);
   return 5000;
 })();
-/** מרווח בין poll ל-poll (מינ׳ 2ש׳) — אותו לוגיקה כשפיקוד תקין; הגיבוי נכנס רק אם הבקשה/פענוח נכשלו. */
+/** מרווח בין poll ל-poll — ברירת מחדל 1.5s לסנכרון צמוד יותר לפיקוד (OREF_POLL_MS=1000..60000) */
 const OREF_POLL_INTERVAL_MS = (() => {
   const n = Number(process.env.OREF_POLL_MS);
-  if (Number.isFinite(n) && n >= 2000 && n <= 60_000) return Math.floor(n);
-  return 3_000;
+  if (Number.isFinite(n) && n >= 1000 && n <= 60_000) return Math.floor(n);
+  return 1_500;
 })();
 /** מגבלת גודל גוף תשובה (מגן מפני תשובות חריגות שמאטות את השרת). */
 const OREF_MAX_RESPONSE_BYTES = (() => {
@@ -2144,8 +2146,7 @@ function backwardTowardAnchor(targetPosition, anchorLng, anchorLat, backDeg) {
   return [tlng - ux * backDeg, tlat - uy * backDeg];
 }
 
-const LEBANON_ROUTE_ANCHOR = { lng: 35.52, lat: 33.58, back: 0.42 };
-const SYRIA_ROUTE_ANCHOR = { lng: 36.38, lat: 33.48, back: 0.44 };
+const LEBANON_ROUTE_ANCHOR = { lng: 35.53, lat: 33.25, back: 0.42 }; // South Lebanon border (near Fatma Gate/Metula area)
 
 /** ׳ ׳§׳•׳“׳× ׳׳•׳¦׳ ׳¢׳ ׳§׳• ׳׳”׳¢׳•׳’׳ ׳”׳׳¡׳˜׳¨׳˜׳’׳™ ׳׳ ׳”׳™׳¢׳“ (׳׳—׳•׳– ׳׳”׳׳¨׳—׳§ ג€” ׳§׳¨׳•׳‘ ׳׳¢׳•׳’׳ = ׳‘׳×׳•׳ ׳׳™׳¨׳׳/׳¢׳™׳¨׳׳§ ׳•׳›׳•') */
 function pointOnRayFromAnchorTowardTarget(anchorLng, anchorLat, targetPosition, fractionFromAnchor) {
@@ -2246,11 +2247,12 @@ function computeThreatFusionResult(alert) {
   if (
     alert._multiSourceConfirmed === true &&
     alert._multiSourceAxis &&
-    ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert._multiSourceAxis))
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert._multiSourceAxis)) /* Iran disabled */
   ) {
     const bonus = crossSourceCredibilityBonus(2);
+    const msAxis = applyCeasefireBallisticLaunchPrior(alert, String(alert._multiSourceAxis));
     return {
-      axis: String(alert._multiSourceAxis),
+      axis: msAxis,
       fusionTier: 'confirmed_multi_source',
       trajectoryLocked: true,
       trajectoryConfidence: Math.min(0.99, 0.92 + bonus),
@@ -2316,9 +2318,10 @@ function computeThreatFusionResult(alert) {
   if (fromGroup) {
     const ts = alert.orefTimeMs || alert.receivedAtMs || Date.now();
     const axisResolved = regionalAxisOverrideForNorthIsraelTarget(fromGroup, alert) || fromGroup;
-    const geometryAdjusted = axisResolved !== fromGroup;
+    const axisPrior = applyCeasefireBallisticLaunchPrior(alert, axisResolved);
+    const geometryAdjusted = axisPrior !== fromGroup;
     return {
-      axis: axisResolved,
+      axis: axisPrior,
       fusionTier: geometryAdjusted ? 'oref_group_geometry' : 'oref_group',
       trajectoryLocked: !geometryAdjusted,
       trajectoryConfidence: applyCredibilityTimeDecay(
@@ -2342,14 +2345,15 @@ function computeThreatFusionResult(alert) {
   if (
     alert.telegramAiExtraction === true &&
     alert.telegramAiAxis &&
-    ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) &&
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) /* Iran disabled */ &&
     Number(alert.telegramAiConfidence) >= 0.7
   ) {
     const ts = alert.receivedAtMs || Date.now();
     const conf = Number(alert.telegramAiConfidence);
     const baseScore = SOURCE_CREDIBILITY_BASE.telegram_ai * conf;
+    const tgAxis = applyCeasefireBallisticLaunchPrior(alert, String(alert.telegramAiAxis));
     return {
-      axis: String(alert.telegramAiAxis),
+      axis: tgAxis,
       fusionTier: 'telegram_ai',
       trajectoryLocked: true,
       trajectoryConfidence: Math.min(0.88, 0.68 + conf * 0.18),
@@ -2369,7 +2373,7 @@ function computeThreatFusionResult(alert) {
   const corroboratedEvidenceCount = corroboratedAxis
     ? getOsintAxisEvidenceCount(corroboratedAxis, alertTargetZone || osintTargetZone || null)
     : 0;
-  const isDistantAxis = corroboratedAxis ? ['iran', 'iraq', 'yemen'].includes(corroboratedAxis) : false;
+  const isDistantAxis = corroboratedAxis ? ['iraq', 'yemen'].includes(corroboratedAxis) : false; /* Iran disabled */
   const passesCorroborationThreshold = corroboratedAxis
     ? isDistantAxis
       ? hasMatchingZone && corroboratedConfidence >= 0.42 && corroboratedEvidenceCount >= 3
@@ -2380,8 +2384,9 @@ function computeThreatFusionResult(alert) {
     const ts = alert.receivedAtMs || Date.now();
     const predBoost =
       (state.predictionMarketsSnapshot?.escalationScore || 0) > 0.58 ? 0.03 + SOURCE_CREDIBILITY_BASE.prediction_market * 0.05 : 0;
+    const osAxis = applyCeasefireBallisticLaunchPrior(alert, corroboratedAxis);
     return {
-      axis: corroboratedAxis,
+      axis: osAxis,
       fusionTier: 'telegram_osint',
       trajectoryLocked: true,
       trajectoryConfidence: applyCredibilityTimeDecay(Math.min(0.85, 0.55 + corroboratedConfidence * 0.38 + predBoost), ts),
@@ -2402,8 +2407,9 @@ function computeThreatFusionResult(alert) {
       (state.predictionMarketsSnapshot?.escalationScore || 0) > 0.55
         ? 0.04
         : 0;
+    const gdAxis = applyCeasefireBallisticLaunchPrior(alert, gHint.axis);
     return {
-      axis: gHint.axis,
+      axis: gdAxis,
       fusionTier: 'gdelt_news',
       trajectoryLocked: false,
       trajectoryConfidence: applyCredibilityTimeDecay(
@@ -2425,7 +2431,7 @@ function computeThreatFusionResult(alert) {
 
 function getGdeltCorroborationForAlert(alert) {
   const g = state.gdeltCorroboration;
-  if (!g?.axis || !['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(g.axis))) return null;
+  if (!g?.axis || !['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(g.axis)) /* Iran disabled */) return null;
   if (Date.now() - (g.updatedAt || 0) > 20 * 60_000) return null;
   if ((g.confidence || 0) < 0.42) return null;
   return g;
@@ -2453,7 +2459,7 @@ async function fetchGdeltDocArticlesWithQuery(q, opts = {}) {
 }
 
 async function fetchGdeltDocArticles() {
-  const q = process.env.GDELT_QUERY || '(iran OR israel OR missile OR rocket OR strike)';
+  const q = process.env.GDELT_QUERY || '(israel OR lebanon OR hezbollah OR gaza OR missile OR rocket OR strike)'; /* Iran removed */
   return fetchGdeltDocArticlesWithQuery(q);
 }
 
@@ -2467,11 +2473,10 @@ function getGdeltFusionBurstQueries() {
   } catch (e) {
     console.warn('[GDELT] GDELT_FUSION_BURST_QUERIES_JSON parse failed:', e.message);
   }
-  const base = process.env.GDELT_QUERY || '(iran OR israel OR missile OR rocket OR strike)';
+  const base = process.env.GDELT_QUERY || '(israel OR lebanon OR hezbollah OR gaza OR missile OR rocket OR strike)'; /* Iran removed */
   return [
     base,
     '(lebanon OR hezbollah OR beirut) (missile OR rocket OR strike OR attack)',
-    '(syria OR damascus) (missile OR rocket OR strike OR attack)',
     '(yemen OR houthi OR houthis) (missile OR rocket OR strike OR attack)',
     '(iraq OR baghdad) (missile OR rocket OR strike OR attack)',
     '(iran OR irgc OR tehran) (missile OR rocket OR strike OR attack)',
@@ -2531,14 +2536,13 @@ async function updateGdeltFusionBurst() {
 }
 
 function ingestGdeltArticles(articles) {
-  const votes = { iran: 0, iraq: 0, yemen: 0, lebanon: 0, syria: 0, gaza: 0 };
+  const votes = { iraq: 0, yemen: 0, lebanon: 0, gaza: 0 }; /* Iran removed */
   const conflictRe = /(missile|rocket|strike|attack|שיגור|טיל|ירי|war|airstrike|ballistic|houthis|hezbollah)/i;
   const kw = [
-    [/\biran\b|ایران|tehran|irgc/i, 'iran'],
+    /* [/\biran\b|ایران|tehran|irgc/i, 'iran'], // Iran disabled */
     [/\biraq\b|baghdad/i, 'iraq'],
     [/\byemen\b|houthi|houthis|sanaa/i, 'yemen'],
     [/\blebanon\b|hezbollah|beirut/i, 'lebanon'],
-    [/\bsyria\b|damascus/i, 'syria'],
     [/\bgaza\b|hamas/i, 'gaza'],
   ];
   for (const a of (articles || []).slice(0, 120)) {
@@ -2577,7 +2581,7 @@ async function updateGdelt() {
 
 async function fetchPredictionMarketsCombined() {
   const out = { polymarket: [], manifold: [], escalationScore: 0 };
-  const keywords = /iran|israel|gaza|lebanon|yemen|war|missile|hezbollah|houthis|irgc|-idf|idf/i;
+  const keywords = /israel|gaza|lebanon|yemen|war|missile|hezbollah|houthis|-idf|idf/i; /* Iran removed */
   try {
     const r = await axios.get('https://gamma-api.polymarket.com/markets', {
       params: { limit: 100, active: true, closed: false },
@@ -2698,7 +2702,7 @@ function inferExplicitOrefThreatAxis(alert) {
 
   if (
     alert.sourceAxisHint &&
-    ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.sourceAxisHint))
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.sourceAxisHint)) /* Iran disabled */
   ) {
     const hintAx = String(alert.sourceAxisHint);
     const axisH = regionalAxisOverrideForNorthIsraelTarget(hintAx, alert) || hintAx;
@@ -2765,7 +2769,7 @@ function computeOrefPollAxisHint(effectiveAlerts, historySnapshot) {
       sourceConfidenceScore: 0.72,
     };
   }
-  const isDistantAxis = bestAxis && ['iran', 'iraq', 'yemen'].includes(bestAxis);
+  const isDistantAxis = bestAxis && ['iraq', 'yemen'].includes(bestAxis); /* Iran disabled */
   const alertCount = Array.isArray(effectiveAlerts) ? effectiveAlerts.length : 0;
   if (bestAxis && bestVotes >= 1 && isDistantAxis && axisVotes.size === 1 && alertCount >= 2) {
     return {
@@ -2823,19 +2827,16 @@ function inferAlertTargetZone(alert) {
 /** צירים ארוכי־טווח — כשהצבעה מגל ההתראות טועה, לא לכפות על יעד בצפון */
 function isDistantThreatAxisForRegionalOverride(axis) {
   const a = String(axis || '').toLowerCase();
-  return a === 'iran' || a === 'iraq' || a === 'yemen';
+  return a === 'iraq' || a === 'yemen'; /* Iran disabled - was: a === 'iran' || a === 'iraq' || a === 'yemen' */
 }
 
-function nearestLebanonOrSyriaAxisForTargetLngLat(tp) {
-  const [tlng, tlat] = normalizeLngLat(tp);
-  const leb = haversineKm([LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat], [tlng, tlat]);
-  const syr = haversineKm([SYRIA_ROUTE_ANCHOR.lng, SYRIA_ROUTE_ANCHOR.lat], [tlng, tlat]);
-  return leb <= syr ? 'lebanon' : 'syria';
+function nearestLebanonOrSyriaAxisForTargetLngLat(_tp) {
+  return 'lebanon';
 }
 
 /**
  * כמו IWM: אם אין "מאיראן" בטקסט ההתרעה של היישוב אבל גל ההתראות שייך לאיראן/עיראק/תימן —
- * ליעד בצפון הארץ נעדיף מוצא לבנון/סוריה (מסלול קצר סביר).
+ * ליעד בצפון/מרכז/ירושלים נעדיף מוצא מלבנון (לא מסוריה — מדיניות מוצא אחיד).
  */
 function regionalAxisOverrideForNorthIsraelTarget(distantAxis, alert) {
   if (!alert || !isDistantThreatAxisForRegionalOverride(distantAxis)) return null;
@@ -2846,8 +2847,86 @@ function regionalAxisOverrideForNorthIsraelTarget(distantAxis, alert) {
   const lat = Number(tp[1]);
   if (!isPlausibleIsraelAlertTarget(lng, lat)) return null;
   const zone = inferTargetZoneFromCoordinates(tp);
-  if (zone !== 'north') return null;
+  if (zone !== 'north' && zone !== 'center' && zone !== 'jerusalem') return null;
   return nearestLebanonOrSyriaAxisForTargetLngLat(tp);
+}
+
+function isLebanonFirstGeographicZone(zone) {
+  return zone === 'north' || zone === 'center' || zone === 'jerusalem';
+}
+
+/** כתבות/מקורות OSINT עם ניסוח מפורש (מאיראן / מעיראק / מתימן) — מאפשרים לעדכן מסלול מעבר לברירת מחדל לבנון */
+function newsAndOsintExplicitlyConfirmDistantAxis(axis) {
+  const ax = String(axis || '').toLowerCase();
+  if (!['iraq', 'yemen'].includes(ax)) return false; /* Iran disabled */
+  const corp = String(newsThreatAxisBlob || '').trim();
+  if (corp && matchExplicitThreatAxisInBlob(corp) === ax) return true;
+  try {
+    const snap = getOsintDebugSnapshot();
+    const hints = Array.isArray(snap?.matchedHints) ? snap.matchedHints : [];
+    for (let i = 0; i < hints.length; i++) {
+      const h = hints[i];
+      if (!h || String(h.axis || '').toLowerCase() !== ax) continue;
+      const chunk = [h.text, h.sourcePattern, h.targetPattern].filter(Boolean).join(' ');
+      if (chunk && matchExplicitThreatAxisInBlob(chunk) === ax) return true;
+    }
+  } catch (_) {
+    /* */
+  }
+  return false;
+}
+
+/**
+ * ברירת מחדל גאופוליטית: הפסקת אש עם איראן — רוב הירי לצפון/מרכז מלבנון; לדרום, טילים רחוקי־טווח
+ * סבירים יותר מתימן מאשר מאיראן. שומרים ציר רחוק רק אם פיקוד (טקסט התרעה), או כתבות/OSINT מפורשים,
+ * או אימות רב־מקור (Telegram+Oref).
+ */
+function applyCeasefireBallisticLaunchPrior(alert, axis) {
+  if (!alert || axis == null || axis === '') return axis;
+  const ax = String(axis).toLowerCase();
+  if (launchAiGeometryPreferred(alert)) return axis;
+  if (String(alert.threatType || 'missile') === 'uav') return axis;
+  const tp = getTargetPosition(alert);
+  if (!tp || tp.length < 2) return axis;
+  if (!isPlausibleIsraelAlertTarget(Number(tp[0]), Number(tp[1]))) return axis;
+
+  if (
+    alert._multiSourceConfirmed === true &&
+    String(alert._multiSourceAxis || '').toLowerCase() === ax &&
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(ax) /* Iran disabled */
+  ) {
+    return axis;
+  }
+
+  const zone = inferTargetZoneFromCoordinates(tp);
+
+  const blob =
+    (typeof alert.orefTextBlob === 'string' && alert.orefTextBlob.trim()
+      ? alert.orefTextBlob.trim()
+      : [
+          alert.title,
+          alert.desc,
+          alert.description,
+          alert.subtitle,
+          alert.msg,
+          alert.message,
+        ]
+          .filter(Boolean)
+          .join(' ')) || '';
+  const explicitOnAlert = blob ? matchExplicitThreatAxisInBlob(blob) : null;
+  if (explicitOnAlert === ax) return axis;
+  if (newsAndOsintExplicitlyConfirmDistantAxis(ax)) return axis;
+
+  if (isLebanonFirstGeographicZone(zone)) {
+    if (!isDistantThreatAxisForRegionalOverride(ax)) return axis;
+    return nearestLebanonOrSyriaAxisForTargetLngLat(tp);
+  }
+
+  if (zone === 'south' && (ax === 'iran' || ax === 'iraq')) {
+    return 'yemen';
+  }
+
+  return axis;
 }
 
 function inferOsintTargetZone(osintAxisHint) {
@@ -2893,7 +2972,7 @@ function isCurrentCorroboratedSourceStillValid(entity) {
   const hasMatchingZone = !alertTargetZone || !osintTargetZone || alertTargetZone === osintTargetZone;
   if (!hasMatchingZone) return false;
   const corroboratedEvidenceCount = getOsintAxisEvidenceCount(entity.sourceRegion, alertTargetZone || osintTargetZone || null);
-  const isDistantAxis = ['iran', 'iraq', 'yemen'].includes(entity.sourceRegion);
+  const isDistantAxis = ['iraq', 'yemen'].includes(entity.sourceRegion); /* Iran disabled */
   const confidence = Number(osintAxis.confidence || 0);
   return isDistantAxis
     ? confidence >= 0.42 && corroboratedEvidenceCount >= 3
@@ -2920,9 +2999,10 @@ function getCorroboratedOsintAxis(alert) {
   try {
     const osintHint = getOsintAxisHintSync();
     if (!osintHint?.axis) return null;
+    if (String(osintHint.axis).toLowerCase() === 'iran') return null;
     const confidence = Number(osintHint.confidence || 0);
     const evidenceCount = getOsintAxisEvidenceCount(osintHint.axis, inferAlertTargetZone(alert));
-    const isDistant = ['iran', 'iraq', 'yemen'].includes(osintHint.axis);
+    const isDistant = ['iraq', 'yemen'].includes(osintHint.axis);
     if (isDistant) {
       return confidence >= 0.42 && evidenceCount >= 3 ? osintHint.axis : null;
     }
@@ -2937,12 +3017,16 @@ function getGdeltCorroborationAxisSync(alert) {
   return h?.axis || null;
 }
 
-/** מסלולי מפה: לא משתמשים במוצא עזה — טילים בליסטיים לדרום הוזנו בטעות כ"מעזה" בעוד שמקורם איראן/ארוך טווח */
+/** מסלולי מפה: לא מוצא עזה; לא מוצגת איראן — עזה/איראן ממופים לתימן (ארוך טווח ללא שיגור מאיראן במפה) */
 const GAZA_BALLISTIC_MAP_ORIGIN_DISABLED = true;
 
 function mapMissileDisplaySourceRegion(region) {
-  if (!GAZA_BALLISTIC_MAP_ORIGIN_DISABLED || region !== 'gaza') return region;
-  return 'iran';
+  if (region == null || region === '') return region;
+  const r = String(region).toLowerCase();
+  if (r === 'syria') return 'lebanon';
+  if (r === 'iran') return 'yemen';
+  if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && r === 'gaza') return 'yemen';
+  return region;
 }
 
 function launchGeometryAlert(orefAlert, missile) {
@@ -2950,7 +3034,7 @@ function launchGeometryAlert(orefAlert, missile) {
   if (
     missile &&
     missile.launchAiAxis &&
-    ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(missile.launchAiAxis))
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(missile.launchAiAxis)) /* Iran disabled */
   ) {
     a.launchAiAxis = String(missile.launchAiAxis);
     a.launchAiConfidence = Number(missile.launchAiConfidence) || 0;
@@ -2962,7 +3046,7 @@ function launchGeometryAlert(orefAlert, missile) {
 function launchAiGeometryPreferred(alert) {
   const aiAx = alert?.launchAiAxis;
   const c = Number(alert?.launchAiConfidence) || 0;
-  if (!aiAx || !['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(aiAx))) {
+  if (!aiAx || !['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(aiAx)) /* Iran disabled */) {
     return false;
   }
   const minWeak = Math.max(0.55, Number(process.env.LAUNCH_AXIS_AI_MIN_CONFIDENCE) || 0.72);
@@ -2979,24 +3063,33 @@ function resolveSourceRegionFromAlert(alert, sourcePosition, targetPosition) {
     return mapMissileDisplaySourceRegion(String(alert.launchAiAxis));
   }
   const inferredAxis = inferOrefThreatAxis(alert);
-  if (inferredAxis) return mapMissileDisplaySourceRegion(inferredAxis);
+  if (inferredAxis) {
+    return mapMissileDisplaySourceRegion(applyCeasefireBallisticLaunchPrior(alert, inferredAxis));
+  }
   const osintAxis = getCorroboratedOsintAxis(alert);
-  if (osintAxis) return mapMissileDisplaySourceRegion(osintAxis);
+  if (osintAxis) {
+    return mapMissileDisplaySourceRegion(applyCeasefireBallisticLaunchPrior(alert, osintAxis));
+  }
   if (
     alert.telegramAiAxis &&
-    ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) &&
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) /* Iran disabled */ &&
     Number(alert.telegramAiConfidence) >= 0.7
   ) {
-    return mapMissileDisplaySourceRegion(String(alert.telegramAiAxis));
+    return mapMissileDisplaySourceRegion(
+      applyCeasefireBallisticLaunchPrior(alert, String(alert.telegramAiAxis))
+    );
   }
   const gdAxis = getGdeltCorroborationAxisSync(alert);
-  if (gdAxis) return mapMissileDisplaySourceRegion(gdAxis);
-  return mapMissileDisplaySourceRegion(getSourceRegion(sourcePosition, targetPosition));
+  if (gdAxis) {
+    return mapMissileDisplaySourceRegion(applyCeasefireBallisticLaunchPrior(alert, gdAxis));
+  }
+  return mapMissileDisplaySourceRegion(
+    applyCeasefireBallisticLaunchPrior(alert, getSourceRegion(sourcePosition, targetPosition))
+  );
 }
 
 const THREAT_LAUNCH_CANDIDATES = [
   { lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat, frac: 0.12 },
-  { lng: SYRIA_ROUTE_ANCHOR.lng, lat: SYRIA_ROUTE_ANCHOR.lat, frac: 0.11 },
   { lng: 44.2, lat: 15.35, frac: 0.055 },
   { lng: 44.58, lat: 33.32, frac: 0.13 },
   { lng: 51.28, lat: 32.52, frac: 0.11 },
@@ -3008,7 +3101,7 @@ const THREAT_LAUNCH_CANDIDATES = [
 function getSourcePositionNearestThreatArc(targetPosition) {
   const [tlng, tlat] = normalizeLngLat(targetPosition);
   if (!isPlausibleSupportedAlertTarget(tlng, tlat)) {
-    return [47.8, 34.1];
+    return [35.5, 33.8]; /* Default to Lebanon - most launches are from Lebanon */
   }
   let bestPt = THREAT_LAUNCH_CANDIDATES[0];
   let bestD = Infinity;
@@ -3023,15 +3116,16 @@ function getSourcePositionNearestThreatArc(targetPosition) {
 }
 
 function getSourcePositionStrategic(targetPosition, axis, threatType) {
-  const effAxis =
-    GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && String(axis).toLowerCase() === 'gaza' ? 'iran' : String(axis).toLowerCase();
+  let effAxis = String(axis).toLowerCase();
+  if (effAxis === 'iran') effAxis = 'yemen';
+  if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && effAxis === 'gaza') effAxis = 'yemen';
+  if (effAxis === 'syria') effAxis = 'lebanon';
   const isUav = threatType === 'uav';
   const anchors = {
     iran: { lng: 51.28, lat: 32.52, frac: isUav ? 0.09 : 0.11 },
     iraq: { lng: 44.58, lat: 33.32, frac: isUav ? 0.12 : 0.14 },
     yemen: { lng: 44.2, lat: 15.35, frac: isUav ? 0.05 : 0.055 },
     lebanon: { lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat, frac: isUav ? 0.1 : 0.12 },
-    syria: { lng: SYRIA_ROUTE_ANCHOR.lng, lat: SYRIA_ROUTE_ANCHOR.lat, frac: isUav ? 0.1 : 0.11 },
   };
   const a = anchors[effAxis];
   if (!a) return getSourcePositionNearestThreatArc(targetPosition);
@@ -3044,7 +3138,9 @@ function getSourcePositionStrategic(targetPosition, axis, threatType) {
 function resolveSourcePosition(alert, targetPosition) {
   if (launchAiGeometryPreferred(alert)) {
     let eff = String(alert.launchAiAxis).toLowerCase();
-    if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && eff === 'gaza') eff = 'iran';
+    if (eff === 'iran') eff = 'yemen';
+    if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && eff === 'gaza') eff = 'yemen';
+    if (eff === 'syria') eff = 'lebanon';
     return getSourcePositionStrategic(targetPosition, eff, alert?.threatType);
   }
   const envRaw = process.env.OREF_DEFAULT_THREAT_AXIS;
@@ -3052,41 +3148,43 @@ function resolveSourcePosition(alert, targetPosition) {
     envRaw && ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(envRaw).toLowerCase())
       ? String(envRaw).toLowerCase()
       : null;
-  const envAxis =
-    GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && envAxisRaw === 'gaza' ? 'iran' : envAxisRaw;
+  let envAxis = envAxisRaw;
+  if (envAxis === 'iran') envAxis = 'yemen';
+  if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && envAxis === 'gaza') envAxis = 'yemen';
   const inferred = inferOrefThreatAxis(alert);
-  const axis =
-    (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && inferred === 'gaza' ? 'iran' : inferred) || envAxis;
+  let inferredEff = inferred;
+  if (inferredEff === 'iran') inferredEff = 'yemen';
+  const axis = (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && inferred === 'gaza' ? 'yemen' : inferredEff) || envAxis;
   if (axis) {
-    return getSourcePositionStrategic(targetPosition, axis, alert?.threatType);
+    const axisEff = applyCeasefireBallisticLaunchPrior(alert, axis);
+    return getSourcePositionStrategic(targetPosition, axisEff, alert?.threatType);
   }
   const osintAxis = getCorroboratedOsintAxis(alert);
   if (osintAxis) {
-    return getSourcePositionStrategic(
-      targetPosition,
-      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && osintAxis === 'gaza' ? 'iran' : osintAxis,
-      alert?.threatType
-    );
+    let oAx = osintAxis === 'iran' ? 'yemen' : osintAxis;
+    if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && oAx === 'gaza') oAx = 'yemen';
+    const oEff = applyCeasefireBallisticLaunchPrior(alert, oAx);
+    return getSourcePositionStrategic(targetPosition, oEff, alert?.threatType);
   }
   if (
     alert.telegramAiAxis &&
-    ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) &&
+    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) /* Iran disabled */ &&
     Number(alert.telegramAiConfidence) >= 0.7
   ) {
     const tgAx = String(alert.telegramAiAxis);
-    return getSourcePositionStrategic(
-      targetPosition,
-      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && tgAx === 'gaza' ? 'iran' : tgAx,
-      alert?.threatType
+    const tgEff = applyCeasefireBallisticLaunchPrior(
+      alert,
+      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && tgAx === 'gaza' ? 'yemen' : tgAx === 'iran' ? 'yemen' : tgAx
     );
+    return getSourcePositionStrategic(targetPosition, tgEff, alert?.threatType);
   }
   const gdAxis = getGdeltCorroborationAxisSync(alert);
   if (gdAxis) {
-    return getSourcePositionStrategic(
-      targetPosition,
-      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && gdAxis === 'gaza' ? 'iran' : gdAxis,
-      alert?.threatType
+    const gEff = applyCeasefireBallisticLaunchPrior(
+      alert,
+      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && gdAxis === 'gaza' ? 'yemen' : gdAxis === 'iran' ? 'yemen' : gdAxis
     );
+    return getSourcePositionStrategic(targetPosition, gEff, alert?.threatType);
   }
   return getSourcePosition(targetPosition);
 }
@@ -3105,11 +3203,9 @@ function getSourceRegion(sourcePosition, targetPosition) {
   const [sourceLng, sourceLat] = normalizeLngLat(sourcePosition);
   const anchors = [
     { region: 'lebanon', lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat },
-    { region: 'syria', lng: SYRIA_ROUTE_ANCHOR.lng, lat: SYRIA_ROUTE_ANCHOR.lat },
     ...(GAZA_BALLISTIC_MAP_ORIGIN_DISABLED ? [] : [{ region: 'gaza', lng: 34.35, lat: 31.35 }]),
     { region: 'yemen', lng: 44.2, lat: 15.35 },
     { region: 'iraq', lng: 44.58, lat: 33.32 },
-    { region: 'iran', lng: 51.28, lat: 32.52 },
   ];
 
   let best = anchors[0];
@@ -3222,7 +3318,7 @@ function getUnverifiedSourcePosition(targetPosition) {
   }
 }
 
-/** ׳™׳™׳©׳•׳¨ sourceRegion/sourceLocation ׳׳₪׳™ ׳ ׳§׳•׳“׳•׳× ׳”׳׳¡׳׳•׳ ׳‘׳₪׳•׳¢׳ (׳׳•׳ ׳¢ ׳˜׳§׳¡׳˜ "׳׳™׳¨׳׳" ׳›׳©׳”׳׳₪׳” ׳׳¦׳™׳’׳” ׳׳•׳¦׳ ׳¦׳₪׳•׳ ׳™) */
+/** יישור sourceRegion/sourceLocation לפי נקודות המסלול (ללא מוצא איראן במפה — ממופה לתימן ב-mapMissileDisplaySourceRegion) */
 function syncMissileSourceFromGeometry(missileEvent) {
   if (!missileEvent || typeof missileEvent !== 'object') return;
   const sp = missileEvent.sourcePosition || missileEvent.source;
@@ -3507,9 +3603,11 @@ function threatTypeFromOrefCategory(cat) {
 
 function detectThreatType(alert) {
   if (!alert || typeof alert !== 'object') {
+    console.log('[detectThreatType] Invalid alert, defaulting to missile');
     return 'missile';
   }
 
+  // Check numeric category from Oref (1=missile, 2=UAV)
   const fromNumericCategory =
     threatTypeFromOrefCategory(alert.orefCategory) ||
     threatTypeFromOrefCategory(alert.cat) ||
@@ -3518,10 +3616,12 @@ function detectThreatType(alert) {
     threatTypeFromOrefCategory(alert.alertCat);
 
   if (fromNumericCategory) {
+    console.log('[detectThreatType] Detected from category:', fromNumericCategory, 'categories:', {cat: alert.cat, category: alert.category, orefCategory: alert.orefCategory});
     return fromNumericCategory;
   }
 
-  const text = [
+  // Collect all text fields for analysis
+  const textFields = [
     alert.title,
     alert.desc,
     alert.description,
@@ -3531,28 +3631,53 @@ function detectThreatType(alert) {
     typeof alert.category === 'string' ? alert.category : '',
     alert.msg,
     alert.message,
-  ]
-    .filter(Boolean)
+    alert.info,
+    alert.text,
+  ].filter(Boolean);
+  
+  const text = textFields
     .join(' ')
-    .toLowerCase()
-    .replace(/\u201c|\u201d|׳´/g, '"');
+    .toLowerCase();
 
-  if (
-    text.includes('׳›׳׳™ ׳˜׳™׳¡') ||
-    text.includes('׳›׳˜׳‘') ||
-    text.includes('׳›׳˜׳‘"׳') ||
-    text.includes('׳›׳˜׳‘׳') ||
-    text.includes('׳—׳“׳™׳¨׳× ׳›׳׳™ ׳˜׳™׳¡') ||
-    text.includes('׳¨׳—׳₪׳') ||
-    text.includes('׳‘׳׳×׳™ ׳׳׳•׳™׳©') ||
-    text.includes('׳׳"׳˜') ||
-    text.includes('׳׳׳˜') ||
-    text.includes('drone') ||
-    text.includes('uav')
-  ) {
-    return 'uav';
+  // Comprehensive UAV/Drone detection in Hebrew and English
+  const uavKeywords = [
+    // Hebrew UAV terms
+    'כטב"ם', 'כטבם', 'כלי טיס בלתי מאויש', 'כלי טייס בלתי מאויש',
+    'רחפן', 'רחפנים', 'כטב"מים', 'כטבמים',
+    'כלי טיס עוין', 'כלי טייס עוין',
+    'כלי טיס בלתי מאוייש', 'כלי טייס בלתי מאוייש',
+    // English UAV terms
+    'drone', 'uav', 'unmanned aerial', 'quadcopter', 'hexacopter',
+    'suicide drone', 'loitering munition', 'kamikaze drone',
+  ];
+  
+  const missileKeywords = [
+    // Hebrew missile terms
+    'טיל', 'טילים', 'רקטה', 'רקטות',
+    'טיל בליסטי', 'טילים בליסטיים',
+    'ירי רקטות', 'ירי טילים',
+    // English missile terms
+    'missile', 'rocket', 'ballistic', 'salvo', 'barrage',
+  ];
+
+  // Check for UAV keywords
+  for (const keyword of uavKeywords) {
+    if (text.includes(keyword.toLowerCase())) {
+      console.log('[detectThreatType] Detected UAV from keyword:', keyword, 'in text:', text.substring(0, 100));
+      return 'uav';
+    }
   }
 
+  // Check for missile keywords
+  for (const keyword of missileKeywords) {
+    if (text.includes(keyword.toLowerCase())) {
+      console.log('[detectThreatType] Detected missile from keyword:', keyword, 'in text:', text.substring(0, 100));
+      return 'missile';
+    }
+  }
+
+  // Default to missile for alerts (safer assumption)
+  console.log('[detectThreatType] No specific keywords found, defaulting to missile. Text:', text.substring(0, 100));
   return 'missile';
 }
 
@@ -3642,13 +3767,14 @@ const THREAT_TIMING_MODEL = {
     default: { speedKmPerSec: 3.0, minMs: 30_000, maxMs: 300_000, displayScale: 1.0, displayMinMs: 30_000, displayMaxMs: 300_000, sirenLeadMs: 12_000, leadFraction: 0.0, earlyWarningBoost: 0.0, minTailMs: 9_000 },
   },
   uav: {
-    lebanon: { speedKmPerSec: 0.07, minMs: 12 * 60_000, maxMs: 45 * 60_000, displayScale: 0.18, displayMinMs: 72_000, displayMaxMs: 150_000, sirenLeadMs: 25_000, leadFraction: 0.12, earlyWarningBoost: 0.12, minTailMs: 16_000 },
-    syria: { speedKmPerSec: 0.08, minMs: 15 * 60_000, maxMs: 60 * 60_000, displayScale: 0.18, displayMinMs: 88_000, displayMaxMs: 190_000, sirenLeadMs: 30_000, leadFraction: 0.20, earlyWarningBoost: 0.12, minTailMs: 16_000 },
-    gaza: { speedKmPerSec: 0.06, minMs: 8 * 60_000, maxMs: 35 * 60_000, displayScale: 0.18, displayMinMs: 64_000, displayMaxMs: 140_000, sirenLeadMs: 22_000, leadFraction: 0.08, earlyWarningBoost: 0.10, minTailMs: 16_000 },
-    iraq: { speedKmPerSec: 0.12, minMs: 70 * 60_000, maxMs: 180 * 60_000, displayScale: 0.18, displayMinMs: 120_000, displayMaxMs: 220_000, sirenLeadMs: 40_000, leadFraction: 0.36, earlyWarningBoost: 0.12, minTailMs: 16_000 },
-    iran: { speedKmPerSec: 0.14, minMs: 300_000, maxMs: 300_000, displayScale: 1.0, displayMinMs: 300_000, displayMaxMs: 300_000, sirenLeadMs: 45_000, leadFraction: 0.44, earlyWarningBoost: 0.12, minTailMs: 16_000 },
-    yemen: { speedKmPerSec: 0.12, minMs: 300_000, maxMs: 300_000, displayScale: 1.0, displayMinMs: 300_000, displayMaxMs: 300_000, sirenLeadMs: 50_000, leadFraction: 0.40, earlyWarningBoost: 0.12, minTailMs: 16_000 },
-    default: { speedKmPerSec: 0.08, minMs: 15 * 60_000, maxMs: 120 * 60_000, displayScale: 0.18, displayMinMs: 85_000, displayMaxMs: 185_000, sirenLeadMs: 30_000, leadFraction: 0.20, earlyWarningBoost: 0.12, minTailMs: 16_000 },
+    // UAV speed: 130 km/h = 0.036 km/sec (user specified)
+    lebanon: { speedKmPerSec: 0.036, minMs: 20 * 60_000, maxMs: 90 * 60_000, displayScale: 0.18, displayMinMs: 120_000, displayMaxMs: 300_000, sirenLeadMs: 30_000, leadFraction: 0.15, earlyWarningBoost: 0.15, minTailMs: 20_000 },
+    syria: { speedKmPerSec: 0.036, minMs: 25 * 60_000, maxMs: 120 * 60_000, displayScale: 0.18, displayMinMs: 150_000, displayMaxMs: 400_000, sirenLeadMs: 35_000, leadFraction: 0.20, earlyWarningBoost: 0.15, minTailMs: 20_000 },
+    gaza: { speedKmPerSec: 0.036, minMs: 15 * 60_000, maxMs: 60 * 60_000, displayScale: 0.18, displayMinMs: 100_000, displayMaxMs: 250_000, sirenLeadMs: 25_000, leadFraction: 0.10, earlyWarningBoost: 0.12, minTailMs: 20_000 },
+    iraq: { speedKmPerSec: 0.036, minMs: 120 * 60_000, maxMs: 300 * 60_000, displayScale: 0.18, displayMinMs: 200_000, displayMaxMs: 500_000, sirenLeadMs: 60_000, leadFraction: 0.40, earlyWarningBoost: 0.15, minTailMs: 20_000 },
+    iran: { speedKmPerSec: 0.036, minMs: 180 * 60_000, maxMs: 400 * 60_000, displayScale: 0.18, displayMinMs: 250_000, displayMaxMs: 600_000, sirenLeadMs: 75_000, leadFraction: 0.45, earlyWarningBoost: 0.15, minTailMs: 20_000 },
+    yemen: { speedKmPerSec: 0.036, minMs: 200 * 60_000, maxMs: 450 * 60_000, displayScale: 0.18, displayMinMs: 300_000, displayMaxMs: 700_000, sirenLeadMs: 80_000, leadFraction: 0.42, earlyWarningBoost: 0.15, minTailMs: 20_000 },
+    default: { speedKmPerSec: 0.036, minMs: 30 * 60_000, maxMs: 150 * 60_000, displayScale: 0.18, displayMinMs: 120_000, displayMaxMs: 350_000, sirenLeadMs: 35_000, leadFraction: 0.20, earlyWarningBoost: 0.15, minTailMs: 20_000 },
   },
 };
 
@@ -4709,7 +4835,7 @@ async function pollOrefMissileLayer() {
       } catch (_) {
         /* */
       }
-      /* OSINT + GDELT במקביל באותו “טיק” (לא אחד אחרי השני) — לפני חישוב fusion להתרעה */
+      /* OSINT + GDELT ברקע — לא חוסמים poll של פיקוד; fusion/סוקט נשארים בזמן אמת */
       if (now - orefBurstOsintLastAt >= OREF_OSINT_BURST_MIN_MS) {
         orefBurstOsintLastAt = now;
         const parallelBurst = [
@@ -4722,17 +4848,18 @@ async function pollOrefMissileLayer() {
             })
           );
         }
-        await Promise.allSettled(parallelBurst);
-        if (
-          process.env.LAUNCH_AXIS_AI_ENABLED === '1' &&
-          process.env.LAUNCH_AXIS_AI_ON_OREF_BURST !== '0'
-        ) {
-          try {
-            setImmediate(() => tickLaunchAxisAi());
-          } catch (_) {
-            /* */
+        void Promise.allSettled(parallelBurst).then(() => {
+          if (
+            process.env.LAUNCH_AXIS_AI_ENABLED === '1' &&
+            process.env.LAUNCH_AXIS_AI_ON_OREF_BURST !== '0'
+          ) {
+            try {
+              setImmediate(() => tickLaunchAxisAi());
+            } catch (_) {
+              /* */
+            }
           }
-        }
+        });
       }
     }
 
@@ -4883,6 +5010,9 @@ async function pollOrefMissileLayer() {
 
     if (freshAlerts.length > 0) {
       lastUnifiedOrefAlertAt = new Date().toISOString();
+      console.log(
+        `[Oref realtime] ערים חדשות בפול (${freshAlerts.length}): ${freshAlerts.map((a) => a && a.cityName).filter(Boolean).join(' · ')}`
+      );
     }
 
     const salvoes = clusterAlertsIntoSalvos(freshAlerts);
@@ -6233,7 +6363,7 @@ function upgradeTelegramMissileWithOref(existingId, alert, salvoMeta) {
     ...alert,
     telegramAiExtraction: false,
     _multiSourceConfirmed: true,
-    _multiSourceAxis: multiAxis || existing.sourceRegion || 'iran',
+    _multiSourceAxis: multiAxis || existing.sourceRegion || 'lebanon',
   };
   const rawSource = resolveSourcePosition(enrichedAlert, targetPosition);
   const missileEvent = {

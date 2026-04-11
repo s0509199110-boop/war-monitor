@@ -42,8 +42,8 @@ function normalizeAiSource(s) {
   if (['yemen', 'houthis', 'houthi', 'sanaa'].includes(x)) return 'yemen';
   if (['lebanon', 'hezbollah', 'hizbullah', 'beirut'].includes(x)) return 'lebanon';
   if (['gaza', 'hamas'].includes(x)) return 'gaza';
-  if (['syria', 'damascus'].includes(x)) return 'syria';
-  return ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(x) ? x : null;
+  if (['syria', 'damascus'].includes(x)) return 'lebanon';
+  return ['iran', 'iraq', 'yemen', 'lebanon', 'gaza'].includes(x) ? x : null;
 }
 
 function normalizeTargetZone(z) {
@@ -178,7 +178,7 @@ Rules:
         : 'unknown';
 
       out.push({
-        sourceRegion: sourceRegion || 'iran',
+        sourceRegion: sourceRegion || 'lebanon',
         targetZone: targetZone || null,
         cityName,
         missileType,
