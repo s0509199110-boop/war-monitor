@@ -1,0 +1,25 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Run every 5 minutes
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Service
+        run: |
+          echo "Pinging Render service..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://war-monitor-d02.onrender.com/health || echo "000")
+          echo "Response code: $RESPONSE"
+          
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Service is healthy"
+          elif [ "$RESPONSE" = "503" ] || [ "$RESPONSE" = "502" ]; then
+            echo "⏳ Service is waking up..."
+          else
+            echo "⚠️ Unexpected response: $RESPONSE"
+          fi
