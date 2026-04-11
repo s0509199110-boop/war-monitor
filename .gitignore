@@ -15,8 +15,9 @@ _tmp_err.log
 _tmp_out.log
 blobs/
 manifests/
-data/chat-history.json
-data/client-event-feed.json
-data/news-articles.json
-data/osint-impact-registry.json
+# data files - include in git for Render persistence
+# data/chat-history.json
+# data/client-event-feed.json
+# data/news-articles.json
+# data/osint-impact-registry.json
 
