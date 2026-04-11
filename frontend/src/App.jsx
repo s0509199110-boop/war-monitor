@@ -28,12 +28,15 @@ function App() {
     lastUpdate: null
   });
 
-  // Socket connection
+  // Socket connection with better stability
   useEffect(() => {
     const newSocket = io(SERVER_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
     });
 
     newSocket.on('connect', () => {
@@ -50,6 +53,15 @@ function App() {
     newSocket.on('connect_error', (err) => {
       console.error('[App] Connection error:', err.message);
       setConnectionStatus('error');
+    });
+
+    newSocket.on('reconnect', (attemptNumber) => {
+      console.log('[App] Reconnected after', attemptNumber, 'attempts');
+      setConnectionStatus('connected');
+    });
+
+    newSocket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('[App] Reconnection attempt', attemptNumber);
     });
 
     // Listen for new alerts
