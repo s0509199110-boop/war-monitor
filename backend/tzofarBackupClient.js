@@ -60,9 +60,13 @@ class TzofarBackupClient {
   }
 
   start() {
-    if (!this.enabled) return;
+    if (!this.enabled) {
+      this.log.warn('[Tzofar backup] Cannot start: not enabled');
+      return;
+    }
     loadCityIdMap();
     this.shouldRun = true;
+    this.log.info('[Tzofar backup] Starting WebSocket connection...');
     this.connect();
   }
 
@@ -90,8 +94,12 @@ class TzofarBackupClient {
   }
 
   connect() {
-    if (!this.shouldRun || !this.enabled) return;
+    if (!this.shouldRun || !this.enabled) {
+      this.log.warn('[Tzofar backup] Cannot connect: not running or not enabled');
+      return;
+    }
     loadCityIdMap();
+    this.log.info(`[Tzofar backup] Attempting connection to: ${this.wsUrl}`);
     try {
       this.ws = new WebSocket(this.wsUrl, {
         headers: {
@@ -131,8 +139,9 @@ class TzofarBackupClient {
       } catch (_) {}
     });
 
-    this.ws.on('close', () => {
+    this.ws.on('close', (code, reason) => {
       this.connected = false;
+      this.log.warn(`[Tzofar backup] WebSocket closed: code=${code}, reason=${reason}`);
       if (this.pingInterval) {
         clearInterval(this.pingInterval);
         this.pingInterval = null;
@@ -141,12 +150,14 @@ class TzofarBackupClient {
     });
 
     this.ws.on('error', (err) => {
-      this.log.warn('[Tzofar backup] WebSocket שגיאה:', err.message);
+      this.log.error('[Tzofar backup] WebSocket error:', err.message);
+      this.log.error('[Tzofar backup] Error details:', err);
     });
   }
 
   scheduleReconnect() {
     if (!this.shouldRun || this.reconnectTimer) return;
+    this.log.info(`[Tzofar backup] Scheduling reconnect in ${this.reconnectMs}ms`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.ws) {
