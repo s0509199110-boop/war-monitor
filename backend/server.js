@@ -1915,7 +1915,9 @@ const OREF_HEADERS = {
 };
 
 const TZOFAR_BACKUP_ENABLED = isTzofarBackupEnvEnabled();
+console.log(`[SERVER INIT] TZOFAR_BACKUP_ENABLED=${TZOFAR_BACKUP_ENABLED}, env value="${process.env.TZOFAR_BACKUP_ENABLED}"`);
 const tzofarBackupClient = TZOFAR_BACKUP_ENABLED ? new TzofarBackupClient({ enabled: true }) : null;
+console.log(`[SERVER INIT] tzofarBackupClient created: ${tzofarBackupClient !== null}`);
 
 /** ׳׳¢׳¨׳ [lng,lat] ׳-Leaflet; ׳׳ ׳”׳’׳™׳¢ [lat,lng] (׳ ׳₪׳•׳¥ ׳‘-API) ג€” ׳׳×׳§׳ */
 function normalizeCoordPairToLngLat(pair) {
