@@ -9,7 +9,10 @@ import MapWithIcons from './components/MapWithIcons';
 import Widgets from './components/Widgets';
 import './App.css';
 
-const SERVER_URL = 'http://localhost:8080';
+// Use Render URL in production, localhost in development
+const SERVER_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:8080' 
+  : 'https://war-monitor-d02.onrender.com';
 
 // ==========================================
 // Main App Component
