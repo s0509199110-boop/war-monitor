@@ -66,6 +66,7 @@ const CRITICAL_SETTLEMENT_COORD_OVERRIDES = {
   'שאר ישוב': { lat: 33.2257, lng: 35.6481 },
   'קיבוץ דן': { lat: 33.2402, lng: 35.6530 },
   'דן': { lat: 33.2402, lng: 35.6530 },
+  'אודם': { lat: 33.1852, lng: 35.7496 }, // Fixed: was incorrectly at 31.737 (south/Dead Sea area)
   'שניר': { lat: 33.2443, lng: 35.6508 },
   'כפר סאלד': { lat: 33.196034, lng: 35.657995 },
   'רמת טראמפ': { lat: 33.1298, lng: 35.7871 },
@@ -132,6 +133,37 @@ const io = new Server(server, {
 let aiSummaryRefreshInFlight = null;
 let aiSummaryLastRefreshAt = 0;
 let orefBurstOsintLastAt = 0;
+
+// ==========================================
+// Push Notifications - Store subscriptions
+// ==========================================
+const pushSubscriptions = new Map(); // socketId -> subscription
+
+// Send push notification to all subscribers
+function sendPushToAll(title, body, data = {}) {
+  if (pushSubscriptions.size === 0) return;
+  
+  const payload = JSON.stringify({
+    title,
+    body,
+    data,
+    tag: 'war-alert',
+    timestamp: Date.now()
+  });
+  
+  // For now, log the push - real implementation needs web-push library with VAPID
+  console.log(`[Push] Would send to ${pushSubscriptions.size} subscribers:`, { title, body });
+  
+  // TODO: Integrate web-push library for real push notifications
+  // Example:
+  // const webpush = require('web-push');
+  // webpush.setVapidDetails(...);
+  // for (const [socketId, subscription] of pushSubscriptions) {
+  //   webpush.sendNotification(subscription, payload).catch(err => {
+  //     if (err.statusCode === 410) pushSubscriptions.delete(socketId);
+  //   });
+  // }
+}
 const AI_SUMMARY_MIN_REFRESH_MS = Math.max(5_000, Number(process.env.AI_SUMMARY_MIN_REFRESH_MS) || 15_000);
 const OREF_OSINT_BURST_MIN_MS = Math.max(5_000, Number(process.env.OREF_OSINT_BURST_MIN_MS) || 15_000);
 
@@ -2046,7 +2078,8 @@ function normalizeMissileEndpointsForInbound(alert, sourcePosition, targetPositi
   let src = normalizeLngLat(sourcePosition);
   if (threatType === 'uav') {
     tgt = clampTargetLngLatToSupportedRegion(alert, tgt);
-    if (isPlausibleSupportedAlertTarget(src[0], src[1])) {
+    // For UAVs, source should be OUTSIDE Israel, so resolve if NOT a plausible target
+    if (!isPlausibleSupportedAlertTarget(src[0], src[1])) {
       src = resolveSourcePosition(alert, tgt);
     }
     return { sourcePosition: src, targetPosition: tgt };
@@ -2148,7 +2181,7 @@ function backwardTowardAnchor(targetPosition, anchorLng, anchorLat, backDeg) {
   return [tlng - ux * backDeg, tlat - uy * backDeg];
 }
 
-const LEBANON_ROUTE_ANCHOR = { lng: 35.53, lat: 33.25, back: 0.42 }; // South Lebanon border (near Fatma Gate/Metula area)
+const LEBANON_ROUTE_ANCHOR = { lng: 35.43, lat: 33.12, back: 0.42 }; // Bint Jbeil (בינת ג'בל), South Lebanon
 
 /** ׳ ׳§׳•׳“׳× ׳׳•׳¦׳ ׳¢׳ ׳§׳• ׳׳”׳¢׳•׳’׳ ׳”׳׳¡׳˜׳¨׳˜׳’׳™ ׳׳ ׳”׳™׳¢׳“ (׳׳—׳•׳– ׳׳”׳׳¨׳—׳§ ג€” ׳§׳¨׳•׳‘ ׳׳¢׳•׳’׳ = ׳‘׳×׳•׳ ׳׳™׳¨׳׳/׳¢׳™׳¨׳׳§ ׳•׳›׳•') */
 function pointOnRayFromAnchorTowardTarget(anchorLng, anchorLat, targetPosition, fractionFromAnchor) {
@@ -6522,6 +6555,14 @@ async function pollTelegramMissileLayer() {
       scheduleOrefClientSocketEmit(() => {
         io.emit('real_time_missile', missileEvent);
       });
+      
+      // Send push notification
+      const threatTypeLabel = missileEvent.threatType === 'uav' ? 'כטב"מ' : 'טיל';
+      sendPushToAll(
+        `🚨 צבע אדום - ${payload.cityName}`,
+        `התראת ${threatTypeLabel} ב${payload.cityName} מ${payload.sourceRegion || 'מקור לא ידוע'}`,
+        { cityName: payload.cityName, threatType: missileEvent.threatType }
+      );
     }
   } finally {
     telegramMissilePollInFlight = false;
@@ -6881,8 +6922,26 @@ io.on('connection', (socket) => {
     io.emit('chat_message', msg);
   });
 
+  // ==========================================
+  // Push Notifications - Subscribe/Unsubscribe
+  // ==========================================
+  socket.on('push_subscribe', (subscription) => {
+    if (!subscription || !subscription.endpoint) {
+      console.log('[Push] Invalid subscription from', socket.id);
+      return;
+    }
+    pushSubscriptions.set(socket.id, subscription);
+    console.log('[Push] Client subscribed:', socket.id, subscription.endpoint.slice(0, 50) + '...');
+  });
+
+  socket.on('push_unsubscribe', (data) => {
+    pushSubscriptions.delete(socket.id);
+    console.log('[Push] Client unsubscribed:', socket.id);
+  });
+
   socket.on('disconnect', () => {
     chatMsgBurst.delete(socket.id);
+    pushSubscriptions.delete(socket.id);
     console.log('[Socket] Client disconnected:', socket.id);
     setImmediate(() => broadcastOnlineViewerCount());
   });

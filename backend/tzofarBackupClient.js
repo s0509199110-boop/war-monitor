@@ -242,6 +242,7 @@ class TzofarBackupClient {
     for (const [threat, cities] of grouped.entries()) {
       const titleBase = THREAT_TITLE[threat] || 'התרעת צבע אדום';
       const cat = threat === 5 ? 2 : 1;
+      const threatType = threat === 5 ? 'uav' : 'missile';
       out.push({
         id: `tzofar-backup-${threat}-${nowSec}-${idx++}`,
         title: `${titleBase} · גיבוי צופר`,
@@ -249,6 +250,7 @@ class TzofarBackupClient {
         time: nowSec,
         cat,
         category: cat,
+        threatType,
         _tzofarBackup: true,
       });
     }

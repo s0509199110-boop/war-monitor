@@ -12,11 +12,18 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
 const MapWithIcons = ({ socket: propSocket }) => {
+  // ==========================================
+  // Mobile Detection
+  // ==========================================
+  const isMobile = useMemo(() => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+  }, []);
+  
   const [viewState, setViewState] = useState({
     longitude: 35.0,
     latitude: 32.5,
-    zoom: 7,
-    pitch: 45,
+    zoom: isMobile ? 6.5 : 7,          // Slightly zoomed out on mobile
+    pitch: isMobile ? 30 : 45,        // Less pitch on mobile for better view
     bearing: 0
   });
 
@@ -26,6 +33,11 @@ const MapWithIcons = ({ socket: propSocket }) => {
   const [intercepts, setIntercepts] = useState([]);
   const [impacts, setImpacts] = useState([]);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [autoZoomEnabled, setAutoZoomEnabled] = useState(true); // Auto-zoom to new threats
+  const [isDarkMode, setIsDarkMode] = useState(true); // Day/night mode
+  const [alertHistory, setAlertHistory] = useState([]); // Alert history (last 24h)
+  const [showHistory, setShowHistory] = useState(false); // Toggle history panel
+  const [pushEnabled, setPushEnabled] = useState(false); // Push notifications
   
   // Track missile waves - group alerts within 10 seconds into one missile
   const [missileWaveId, setMissileWaveId] = useState(0);
@@ -35,6 +47,115 @@ const MapWithIcons = ({ socket: propSocket }) => {
 
   const socketRef = useRef(propSocket);
   useEffect(() => { socketRef.current = propSocket; }, [propSocket]);
+
+  // ==========================================
+  // Persistence: Save/Restore missile state
+  // ==========================================
+  const MISSILE_STORAGE_KEY = 'war-monitor-missiles';
+  
+  // Save missiles to localStorage before unload
+  useEffect(() => {
+    const saveMissiles = () => {
+      const data = {
+        missiles: activeMissiles,
+        timestamp: Date.now(),
+        waveId: missileWaveId
+      };
+      localStorage.setItem(MISSILE_STORAGE_KEY, JSON.stringify(data));
+    };
+    
+    window.addEventListener('beforeunload', saveMissiles);
+    return () => window.removeEventListener('beforeunload', saveMissiles);
+  }, [activeMissiles, missileWaveId]);
+  
+  // Restore missiles from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(MISSILE_STORAGE_KEY);
+    if (!saved) return;
+    
+    try {
+      const data = JSON.parse(saved);
+      const timeAway = Date.now() - data.timestamp;
+      
+      // Restore missiles that are still in flight
+      if (data.missiles && data.missiles.length > 0) {
+        const restoredMissiles = data.missiles
+          .filter(m => m.progress < 1 && !m.fading)
+          .map(m => ({
+            ...m,
+            // Adjust timestamps so missile continues from correct position
+            clientStartTime: (m.clientStartTime || m.timestamp) + timeAway,
+            timestamp: m.timestamp + timeAway
+          }));
+        
+        if (restoredMissiles.length > 0) {
+          setActiveMissiles(restoredMissiles);
+          setMissileWaveId(data.waveId || 0);
+          console.log('[Persistence] Restored', restoredMissiles.length, 'missiles after', timeAway, 'ms away');
+        }
+      }
+      
+      // Clear saved data after restore
+      localStorage.removeItem(MISSILE_STORAGE_KEY);
+    } catch (e) {
+      console.error('[Persistence] Failed to restore missiles:', e);
+    }
+  }, []);
+
+  // ==========================================
+  // Day/Night Mode - Auto detect based on hour
+  // ==========================================
+  useEffect(() => {
+    const checkDayNight = () => {
+      const hour = new Date().getHours();
+      // Night: 19:00 (7 PM) to 06:00 (6 AM)
+      const isNight = hour >= 19 || hour < 6;
+      setIsDarkMode(isNight);
+    };
+    
+    checkDayNight();
+    // Check every minute for day/night change
+    const interval = setInterval(checkDayNight, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ==========================================
+  // Alert History Cleanup - remove alerts older than 24 hours
+  // ==========================================
+  useEffect(() => {
+    const cleanupOldAlerts = () => {
+      const now = Date.now();
+      const twentyFourHours = 24 * 60 * 60 * 1000;
+      setAlertHistory(prev => prev.filter(alert => now - alert.timestamp < twentyFourHours));
+    };
+    
+    // Clean up every 5 minutes
+    const interval = setInterval(cleanupOldAlerts, 300000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ==========================================
+  // Push Notifications - Check if already subscribed
+  // ==========================================
+  useEffect(() => {
+    const checkPushStatus = async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log('[Push] Not supported');
+        return;
+      }
+      
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        setPushEnabled(!!subscription);
+        console.log('[Push] Subscription status:', subscription ? 'active' : 'none');
+      } catch (err) {
+        console.error('[Push] Error checking status:', err);
+      }
+    };
+    
+    checkPushStatus();
+  }, []);
 
   // ==========================================
   // Animation Loop - single RAF for currentTime
@@ -79,6 +200,77 @@ const MapWithIcons = ({ socket: propSocket }) => {
   }, []);
 
   // ==========================================
+  // ==========================================
+  // Push Notifications - Toggle subscription
+  // ==========================================
+  const togglePushNotifications = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('התראות Push אינן נתמכות בדפדפן זה');
+      return;
+    }
+    
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      
+      if (pushEnabled) {
+        // Unsubscribe
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          await subscription.unsubscribe();
+          console.log('[Push] Unsubscribed');
+          
+          // Notify server to remove subscription
+          if (socketRef.current) {
+            socketRef.current.emit('push_unsubscribe', { endpoint: subscription.endpoint });
+          }
+        }
+        setPushEnabled(false);
+      } else {
+        // Request permission
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          alert('יש לאשר הרשאות התראות כדי לקבל עדכונים');
+          return;
+        }
+        
+        // Subscribe - NOTE: In production, VAPID keys should come from server
+        // For now we'll use a placeholder - real implementation needs server-side VAPID
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array('PLACEHOLDER_VAPID_KEY')
+        });
+        
+        console.log('[Push] Subscribed:', subscription);
+        
+        // Send subscription to server
+        if (socketRef.current) {
+          socketRef.current.emit('push_subscribe', subscription);
+        }
+        
+        setPushEnabled(true);
+        
+        // Test notification
+        new Notification('🚨 War Monitor', {
+          body: 'התראות Push הופעלו בהצלחה!',
+          icon: '/icon-192x192.svg'
+        });
+      }
+    } catch (err) {
+      console.error('[Push] Error:', err);
+      alert('שגיאה בהפעלת התראות: ' + err.message);
+    }
+  };
+  
+  // Helper for VAPID key conversion (needed for real implementation)
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)));
+  }
+
   // Socket Listeners
   // ==========================================
   useEffect(() => {
@@ -103,6 +295,20 @@ const MapWithIcons = ({ socket: propSocket }) => {
           title: data.title || 'התראה',
           threatType: data.threatType || 'missile'
         }];
+      });
+      
+      // Add to alert history
+      setAlertHistory(prev => {
+        const newAlert = {
+          id: `alert-${Date.now()}-${data.cityName}`,
+          cityName: data.cityName,
+          timestamp: Date.now(),
+          title: data.title || 'התראה',
+          threatType: data.threatType || 'missile',
+          sourceRegion: data.sourceRegion || 'unknown'
+        };
+        // Keep only last 100 alerts
+        return [newAlert, ...prev].slice(0, 100);
       });
       
       // Add to pending targets for grouped missile launch
@@ -133,7 +339,7 @@ const MapWithIcons = ({ socket: propSocket }) => {
         
         const now = Date.now();
         const waveId = `wave-${missileWaveId}-${now}`;
-        const source = [35.53, 33.25]; // South Lebanon border coordinates (near Fatma Gate/Metula area)
+        const source = [35.43, 33.12]; // Bint Jbeil (בינת ג'בל), South Lebanon
         
         // Calculate split point - just before reaching targets (90% of the way)
         // This makes the split happen much closer to the cities
@@ -179,18 +385,32 @@ const MapWithIcons = ({ socket: propSocket }) => {
     const onRealTimeMissile = (data) => {
       console.log('[onRealTimeMissile] Received:', data.id, 'source:', data.source, 'target:', data.target, 'sourceRegion:', data.sourceRegion);
       if (!data?.id) return;
-      
+
       const region = data.sourceRegion || 'unknown';
       if (region === 'iran') {
         console.log('[onRealTimeMissile] BLOCKED - Iran missile rejected:', data.id, 'region:', region);
         return;
       }
-      
-      const source = data.source || data.sourcePosition;
+
+      // Always use Bint Jbeil as the launch source for consistent display
+      const BINT_JBEIL_SOURCE = [35.43, 33.12];
       const target = data.target || data.targetPosition;
+      // Override source to always be Bint Jbeil for all missiles (single unified source)
+      const source = BINT_JBEIL_SOURCE;
       if (!source || !target) {
         console.log('[onRealTimeMissile] Missing source or target, skipping');
         return;
+      }
+
+      // Auto-zoom to new missile if enabled
+      if (autoZoomEnabled && target) {
+        setViewState(prev => ({
+          ...prev,
+          longitude: target[0],
+          latitude: target[1],
+          zoom: isMobile ? 8.5 : 9,  // Zoom in closer to the threat
+          transitionDuration: 1000  // Smooth animation
+        }));
       }
 
       setActiveMissiles((prev) => {
@@ -718,7 +938,9 @@ const MapWithIcons = ({ socket: propSocket }) => {
           anchorY: 16
         };
       },
-      getSize: (d) => d.isMainMissile ? 65 : 55,
+      getSize: (d) => isMobile 
+        ? (d.isMainMissile ? 85 : 75)  // Larger icons on mobile for touch
+        : (d.isMainMissile ? 65 : 55),
       sizeUnits: 'pixels',
       getAngle: (d) => getMissileAngle(d),
       billboard: false,
@@ -749,7 +971,7 @@ const MapWithIcons = ({ socket: propSocket }) => {
         };
       }
     });
-  }, [animatedMissiles, currentTime, formatSourceRegion, getSourcePalette, getMissileAngle]);
+  }, [animatedMissiles, currentTime, formatSourceRegion, getSourcePalette, getMissileAngle, isMobile]);
 
   // Layer 3b: Small missiles (cluster munition bomblets after split)
   const smallMissileLayer = useMemo(() => {
@@ -1042,8 +1264,8 @@ const MapWithIcons = ({ socket: propSocket }) => {
       },
       getLineColor: [225, 210, 255, 180],
       getRadius: (d) => 2800 + ((currentTime - d.timestamp) / 1000) * 1800,
-      radiusMinPixels: 4,
-      radiusMaxPixels: 14,
+      radiusMinPixels: isMobile ? 8 : 4,
+      radiusMaxPixels: isMobile ? 20 : 14,
       stroked: true,
       filled: true,
       lineWidthMinPixels: 2,
@@ -1061,7 +1283,7 @@ const MapWithIcons = ({ socket: propSocket }) => {
         };
       }
     });
-  }, [intercepts, currentTime, formatSourceRegion]);
+  }, [intercepts, currentTime, formatSourceRegion, isMobile]);
 
   // Layer 6: Impact markers
   const impactPulseLayer = useMemo(() => {
@@ -1076,8 +1298,8 @@ const MapWithIcons = ({ socket: propSocket }) => {
       },
       getLineColor: [255, 232, 170, 170],
       getRadius: (d) => 3200 + ((currentTime - d.timestamp) / 1000) * 2800,
-      radiusMinPixels: 5,
-      radiusMaxPixels: 18,
+      radiusMinPixels: isMobile ? 10 : 5,
+      radiusMaxPixels: isMobile ? 24 : 18,
       stroked: true,
       filled: true,
       lineWidthMinPixels: 2,
@@ -1095,7 +1317,7 @@ const MapWithIcons = ({ socket: propSocket }) => {
         };
       }
     });
-  }, [impacts, currentTime, formatSourceRegion]);
+  }, [impacts, currentTime, formatSourceRegion, isMobile]);
 
   // Layer 7: Map entities (flights, etc.)
   const iconLayer = useMemo(() => {
@@ -1173,6 +1395,93 @@ const MapWithIcons = ({ socket: propSocket }) => {
             <div>ממתין למקור האיום...</div>
           </div>
         )}
+        
+        {/* Auto-zoom toggle */}
+        <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #333' }}>
+          <button
+            onClick={() => setAutoZoomEnabled(!autoZoomEnabled)}
+            style={{
+              background: autoZoomEnabled ? 'rgba(244,203,74,0.2)' : 'rgba(100,100,100,0.2)',
+              border: `1px solid ${autoZoomEnabled ? '#f4cb4a' : '#666'}`,
+              color: autoZoomEnabled ? '#f4cb4a' : '#999',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              marginBottom: '6px'
+            }}
+          >
+            <span>{autoZoomEnabled ? '🎯' : '📍'}</span>
+            <span>זום אוטומטי {autoZoomEnabled ? 'מופעל' : 'כבוי'}</span>
+          </button>
+          
+          {/* Day/Night toggle */}
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            style={{
+              background: isDarkMode ? 'rgba(100,100,150,0.2)' : 'rgba(255,200,100,0.2)',
+              border: `1px solid ${isDarkMode ? '#8899cc' : '#cc9900'}`,
+              color: isDarkMode ? '#aaccff' : '#cc8800',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              marginBottom: '6px'
+            }}
+          >
+            <span>{isDarkMode ? '🌙' : '☀️'}</span>
+            <span>{isDarkMode ? 'מצב לילה' : 'מצב יום'}</span>
+          </button>
+          
+          {/* History toggle */}
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            style={{
+              background: showHistory ? 'rgba(100,200,100,0.2)' : 'rgba(100,100,100,0.2)',
+              border: `1px solid ${showHistory ? '#66cc66' : '#666'}`,
+              color: showHistory ? '#88ff88' : '#999',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              marginBottom: '6px'
+            }}
+          >
+            <span>📋</span>
+            <span>היסטוריה ({alertHistory.length})</span>
+          </button>
+          
+          {/* Push notifications toggle */}
+          <button
+            onClick={togglePushNotifications}
+            disabled={!('serviceWorker' in navigator)}
+            style={{
+              background: pushEnabled ? 'rgba(255,100,100,0.2)' : 'rgba(100,100,100,0.2)',
+              border: `1px solid ${pushEnabled ? '#ff6666' : '#666'}`,
+              color: pushEnabled ? '#ff8888' : '#999',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              cursor: ('serviceWorker' in navigator) ? 'pointer' : 'not-allowed',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              opacity: ('serviceWorker' in navigator) ? 1 : 0.5
+            }}
+          >
+            <span>{pushEnabled ? '🔔' : '🔕'}</span>
+            <span>התראות {pushEnabled ? 'פעילות' : 'כבויות'}</span>
+          </button>
+        </div>
       </div>
 
       <DeckGL
@@ -1184,10 +1493,103 @@ const MapWithIcons = ({ socket: propSocket }) => {
       >
         <MapboxMap
           mapboxAccessToken={MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/dark-v11"
+          mapStyle={isDarkMode ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11"}
           style={{ width: '100%', height: '100%' }}
         />
       </DeckGL>
+
+      {/* Alert History Panel */}
+      {showHistory && (
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          width: '320px',
+          maxHeight: '60%',
+          background: isDarkMode ? 'rgba(20,20,30,0.95)' : 'rgba(245,245,250,0.95)',
+          border: `1px solid ${isDarkMode ? '#444' : '#ccc'}`,
+          borderRadius: '8px',
+          zIndex: 20,
+          overflow: 'auto',
+          padding: '15px',
+          color: isDarkMode ? '#fff' : '#333',
+          fontSize: '13px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '12px',
+            paddingBottom: '8px',
+            borderBottom: `1px solid ${isDarkMode ? '#444' : '#ddd'}`
+          }}>
+            <h3 style={{ margin: 0, fontSize: '14px' }}>📋 היסטוריית התראות</h3>
+            <button
+              onClick={() => setShowHistory(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: isDarkMode ? '#999' : '#666',
+                cursor: 'pointer',
+                fontSize: '18px'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          {alertHistory.length === 0 ? (
+            <div style={{ color: isDarkMode ? '#888' : '#999', textAlign: 'center', padding: '20px 0' }}>
+              אין התראות ב-24 השעות האחרונות
+            </div>
+          ) : (
+            <div>
+              {alertHistory.map((alert) => {
+                const age = Date.now() - alert.timestamp;
+                const hours = Math.floor(age / (1000 * 60 * 60));
+                const minutes = Math.floor((age % (1000 * 60 * 60)) / (1000 * 60));
+                const timeLabel = hours > 0 
+                  ? `לפני ${hours} שעות` 
+                  : `לפני ${minutes} דקות`;
+                
+                return (
+                  <div
+                    key={alert.id}
+                    style={{
+                      padding: '10px',
+                      marginBottom: '8px',
+                      background: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+                      borderRadius: '6px',
+                      borderRight: `3px solid ${alert.threatType === 'uav' ? '#66ccff' : '#ff6666'}`
+                    }}
+                  >
+                    <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                      {alert.cityName}
+                    </div>
+                    <div style={{ fontSize: '11px', color: isDarkMode ? '#aaa' : '#666', marginBottom: '3px' }}>
+                      {timeLabel} • {alert.title}
+                    </div>
+                    <div style={{ fontSize: '11px' }}>
+                      <span style={{ 
+                        color: alert.threatType === 'uav' ? '#66ccff' : '#ff6666',
+                        fontWeight: 'bold'
+                      }}>
+                        {alert.threatType === 'uav' ? '🛸 כטב"מ' : '🚀 טיל'}
+                      </span>
+                      {alert.sourceRegion && alert.sourceRegion !== 'unknown' && (
+                        <span style={{ color: isDarkMode ? '#888' : '#666', marginRight: '8px' }}>
+                          {' '}מאת: {alert.sourceRegion}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
