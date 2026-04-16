@@ -6843,6 +6843,90 @@ io.on('connection', (socket) => {
     console.log('[Push] Client unsubscribed:', socket.id);
   });
 
+  // ==========================================
+  // SIMULATION CONTROL - Clean Reset Commands
+  // ==========================================
+  socket.on('admin_clear_all_missiles', () => {
+    console.log('[ADMIN] Clearing all missiles and alerts by request');
+    clearAllActiveMissiles();
+    io.emit('clear_all_threats', { timestamp: new Date().toISOString(), reason: 'admin_clear' });
+    socket.emit('admin_ack', { action: 'clear_all_missiles', status: 'success' });
+  });
+
+  // CLEAN SIMULATION - South Lebanon Only (Bint Jbeil)
+  socket.on('trigger_clean_simulation', (data) => {
+    console.log('[ADMIN] Triggering clean simulation from South Lebanon');
+    
+    // Clear existing missiles first
+    clearAllActiveMissiles();
+    
+    // Bint Jbeil coordinates - South Lebanon (the ONLY source)
+    const BINT_JBEIL = { lng: 35.43, lat: 33.12 };
+    
+    // Target cities in Israel
+    const targetCities = data?.cities || ['תל אביב', 'חיפה', 'ירושלים', 'אשקלון', 'נתניה'];
+    
+    targetCities.forEach((cityName, index) => {
+      const coords = getReliableCityCoordinates(cityName);
+      if (!coords) return;
+      
+      const eventId = `sim-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+      const now = Date.now();
+      
+      const missileEvent = {
+        id: eventId,
+        cityName: cityName,
+        source: [BINT_JBEIL.lng, BINT_JBEIL.lat],
+        target: [coords.lng, coords.lat],
+        sourcePosition: [BINT_JBEIL.lng, BINT_JBEIL.lat],
+        targetPosition: [coords.lng, coords.lat],
+        timestamp: now,
+        orefTimeMs: now,
+        receivedAtMs: now,
+        flightMs: 120000, // 2 minutes
+        displayFlightMs: 120000,
+        displayElapsedMs: 0,
+        displayLeadFraction: 0,
+        threatAxisFromOref: 'lebanon',
+        alertContext: {
+          cityName: cityName,
+          title: `התראת טיל מדרום לבנון - ${cityName}`,
+          threatType: 'missile',
+          orefTextBlob: `שיגור טילים מדרום לבנון לעבר ${cityName}`,
+        },
+        sourceRegion: 'lebanon',
+        sourceLocation: 'דרום לבנון (בינת ג\'בל)',
+        sourceConfidence: 'simulation',
+        trajectoryLocked: true,
+        threatType: 'missile',
+        alertPhase: 'siren_active',
+        phase: 'launch',
+        status: 'inbound',
+        outcome: 'impact',
+        threatLabel: 'טיל',
+        salvoCountEstimate: targetCities.length,
+        salvoIndex: index + 1,
+        waveId: `south-lebanon-wave-${now}`,
+      };
+      
+      // Store and emit
+      storeActiveMissile(missileEvent);
+      scheduleMissileLifecycle(missileEvent);
+      
+      setTimeout(() => {
+        io.emit('real_time_missile', missileEvent);
+      }, index * 500); // Stagger by 500ms
+    });
+    
+    console.log(`[ADMIN] Launched ${targetCities.length} missiles from South Lebanon (Bint Jbeil)`);
+    socket.emit('admin_ack', { 
+      action: 'trigger_clean_simulation', 
+      status: 'success',
+      count: targetCities.length,
+      source: 'Bint Jbeil, South Lebanon'
+    });
+  });
+
   socket.on('disconnect', () => {
     chatMsgBurst.delete(socket.id);
     pushSubscriptions.delete(socket.id);

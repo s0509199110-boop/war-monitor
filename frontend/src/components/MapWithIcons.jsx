@@ -1491,15 +1491,75 @@ const MapWithIcons = ({ socket: propSocket }) => {
               padding: '4px 10px',
               borderRadius: '4px',
               cursor: ('serviceWorker' in navigator) ? 'pointer' : 'not-allowed',
-              fontSize: '11px',
+              fontSize: '12px',
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
+              gap: '6px',
+              width: '100%',
+              justifyContent: 'center',
               opacity: ('serviceWorker' in navigator) ? 1 : 0.5
             }}
           >
             <span>{pushEnabled ? '🔔' : '🔕'}</span>
             <span>התראות {pushEnabled ? 'פעילות' : 'כבויות'}</span>
+          </button>
+          
+          {/* Clean Simulation Button */}
+          <button
+            onClick={() => {
+              if (socketRef.current) {
+                socketRef.current.emit('trigger_clean_simulation', {
+                  cities: ['תל אביב', 'חיפה', 'ירושלים', 'אשקלון', 'נתניה', 'באר שבע']
+                });
+                console.log('[Clean Sim] Triggered from South Lebanon');
+              }
+            }}
+            style={{
+              background: 'rgba(255,150,50,0.2)',
+              border: '1px solid #ff9632',
+              color: '#ffb366',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              width: '100%',
+              justifyContent: 'center',
+              marginTop: '6px'
+            }}
+          >
+            <span>🚀</span>
+            <span>סימולציה נקייה (לבנון)</span>
+          </button>
+          
+          {/* Clear All Button */}
+          <button
+            onClick={() => {
+              if (socketRef.current) {
+                socketRef.current.emit('admin_clear_all_missiles');
+                console.log('[Clear All] Requested');
+              }
+            }}
+            style={{
+              background: 'rgba(150,50,50,0.2)',
+              border: '1px solid #963232',
+              color: '#b36666',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              width: '100%',
+              justifyContent: 'center',
+              marginTop: '6px'
+            }}
+          >
+            <span>🗑️</span>
+            <span>ניקוי הכל</span>
           </button>
         </div>
       </div>
