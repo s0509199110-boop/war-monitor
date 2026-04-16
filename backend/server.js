@@ -3373,9 +3373,10 @@ function syncActiveMissileGeometryFromOrefAlert(alert, sourcePosition, targetPos
     trajectoryLocked = true;
   }
 
-  missile.sourcePosition = sourcePosition;
+  // ALWAYS use Bint Jbeil (בינת ג'בל) - land-based, no sea launches
+  missile.sourcePosition = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
   missile.targetPosition = targetPosition;
-  missile.source = sourcePosition;
+  missile.source = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
   missile.target = targetPosition;
   missile.threatAxisFromOref = explicitAxis;
   missile.alertContext = {
