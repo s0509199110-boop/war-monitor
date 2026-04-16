@@ -3544,6 +3544,9 @@ function syncActiveMissileGeometryFromOrefAlert(alert, sourcePosition, targetPos
   if (geomChanged || phaseUpgraded) {
     clearMissileTimers(missile.id);
     scheduleMissileLifecycle(missile);
+    // Override source to always be Bint Jbeil (land-based, no sea launches)
+    missile.sourcePosition = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+    missile.source = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
     try {
       scheduleOrefClientSocketEmit(() => {
         try {
@@ -4529,6 +4532,10 @@ function ensureThreatExistsForCity(alert, sourceRegion, sourceLocation, options 
       io.emit('new_alert', restorePayload);
     });
   }
+  // Override source to always be Bint Jbeil (land-based, no sea launches)
+  missileEvent.sourcePosition = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+  missileEvent.source = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+
   scheduleOrefClientSocketEmit(() => {
     io.emit('real_time_missile', missileEvent);
   });
@@ -6260,6 +6267,9 @@ function emitSnapshot(socket) {
 
     if (state.activeMissiles.length > 0) {
       state.activeMissiles.forEach((missileEvent) => {
+        // Override source to always be Bint Jbeil (land-based, no sea launches)
+        missileEvent.sourcePosition = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+        missileEvent.source = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
         socket.emit('real_time_missile', missileEvent);
       });
     }
@@ -6431,6 +6441,10 @@ function upgradeTelegramMissileWithOref(existingId, alert, salvoMeta) {
   missileEvent.trajectoryConfidence = Math.min(0.99, (Number(missileEvent.trajectoryConfidence) || 0.9) + 0.03);
   syncMissileSourceFromGeometry(missileEvent);
   clearMissileTimers(existing.id);
+  // Override source to always be Bint Jbeil (land-based, no sea launches)
+  missileEvent.sourcePosition = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+  missileEvent.source = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+
   storeActiveMissile(missileEvent);
   scheduleMissileLifecycle(missileEvent);
   scheduleOrefClientSocketEmit(() => {
@@ -6555,10 +6569,14 @@ async function pollTelegramMissileLayer() {
       scheduleOrefClientSocketEmit(() => {
         io.emit('new_alert', payload);
       });
+      // Override source to always be Bint Jbeil (land-based, no sea launches)
+      missileEvent.sourcePosition = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+      missileEvent.source = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
+
       scheduleOrefClientSocketEmit(() => {
         io.emit('real_time_missile', missileEvent);
       });
-      
+
       // Send push notification
       const threatTypeLabel = missileEvent.threatType === 'uav' ? 'כטב"מ' : 'טיל';
       sendPushToAll(
