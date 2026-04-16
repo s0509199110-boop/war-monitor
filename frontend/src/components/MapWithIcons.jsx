@@ -399,7 +399,7 @@ const MapWithIcons = ({ socket: propSocket }) => {
     };
 
     const onRealTimeMissile = (data) => {
-      console.log('[onRealTimeMissile] Received:', data.id, 'source:', data.source, 'target:', data.target, 'sourceRegion:', data.sourceRegion);
+      console.log('[onRealTimeMissile] Received:', data.id, 'threatType:', data.threatType, 'city:', data.cityName, 'sourceRegion:', data.sourceRegion);
       if (!data?.id) return;
 
       const region = data.sourceRegion || 'unknown';
@@ -945,6 +945,10 @@ const MapWithIcons = ({ socket: propSocket }) => {
       getIcon: (d) => {
         // Different icons for missiles vs UAVs
         const isUAV = d.threatType === 'uav';
+        // Debug logging
+        if (Math.random() < 0.01) {  // Log only 1% to avoid spam
+          console.log('[Missile Icon] threatType:', d.threatType, 'isUAV:', isUAV, 'city:', d.cityName);
+        }
         // ✈️ = airplane for UAV, 🚀 = rocket for missiles
         const icon = isUAV ? '✈️' : '🚀';
         return {
