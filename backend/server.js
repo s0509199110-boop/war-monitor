@@ -249,6 +249,9 @@ function sendMonitorHtml(req, res) {
 app.get('/', sendMonitorHtml);
 app.get('/monitor.html', sendMonitorHtml);
 
+// Serve PWA static files from frontend/public at root path
+app.use(express.static(path.join(ROOT_DIR, 'frontend', 'public')));
+
 app.use(express.static(ROOT_DIR));
 
 app.get('/api/israel-localities', (_req, res) => {
