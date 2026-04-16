@@ -130,13 +130,9 @@ const CITY_COORDINATES = {
   '׳׳™׳׳×': { lat: 29.5581, lng: 34.9482 }
 };
 
-// ׳׳™׳§׳•׳׳™ ׳׳§׳•׳¨׳•׳× ׳©׳™׳’׳•׳¨
+// Bint Jbeil (בינת ג'בל) ONLY - land-based, no sea launches
 const SOURCE_COORDINATES = {
-  '׳׳‘׳ ׳•׳': { lat: 33.8547, lng: 35.8623 },
-  '׳¢׳–׳”': { lat: 31.3547, lng: 34.3088 },
-  '׳×׳™׳׳': { lat: 15.3694, lng: 44.191 },
-  '׳׳™׳¨׳׳': { lat: 32.4279, lng: 53.688 },
-  '׳¢׳™׳¨׳׳§': { lat: 33.2232, lng: 43.6793 }
+  'לבנון': { lat: 33.12, lng: 35.43 }  // Bint Jbeil only
 };
 
 // ׳׳©׳×׳ ׳™ ׳׳¦׳‘
@@ -163,14 +159,9 @@ function getCityCoordinates(cityName) {
   return { lat: 32.0853, lng: 34.7818 };
 }
 
+// ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
 function estimateMissileSource(targetLat, targetLng) {
-  if (targetLat > 32.8) {
-    return { country: '׳׳‘׳ ׳•׳', coords: SOURCE_COORDINATES['׳׳‘׳ ׳•׳'] };
-  } else if (targetLat < 31.2) {
-    return { country: '׳¢׳–׳”', coords: SOURCE_COORDINATES['׳¢׳–׳”'] };
-  } else {
-    return { country: '׳׳™׳¨׳׳', coords: SOURCE_COORDINATES['׳׳™׳¨׳׳'] };
-  }
+  return { country: 'לבנון (בינת ג\'בל)', coords: SOURCE_COORDINATES['לבנון'] };
 }
 
 function createMissileData(alert) {
