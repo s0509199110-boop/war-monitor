@@ -52,6 +52,17 @@ const MapWithIcons = ({ socket: propSocket }) => {
   // Persistence: Save/Restore missile state
   // ==========================================
   const MISSILE_STORAGE_KEY = 'war-monitor-missiles';
+  const STORAGE_VERSION = 'v2-land-based'; // Increment to clear old data
+  
+  // Clear old localStorage data on version change
+  useEffect(() => {
+    const savedVersion = localStorage.getItem('war-monitor-version');
+    if (savedVersion !== STORAGE_VERSION) {
+      console.log('[Persistence] Version changed, clearing old data');
+      localStorage.removeItem(MISSILE_STORAGE_KEY);
+      localStorage.setItem('war-monitor-version', STORAGE_VERSION);
+    }
+  }, []);
   
   // Save missiles to localStorage before unload
   useEffect(() => {
@@ -59,7 +70,8 @@ const MapWithIcons = ({ socket: propSocket }) => {
       const data = {
         missiles: activeMissiles,
         timestamp: Date.now(),
-        waveId: missileWaveId
+        waveId: missileWaveId,
+        version: STORAGE_VERSION
       };
       localStorage.setItem(MISSILE_STORAGE_KEY, JSON.stringify(data));
     };
@@ -79,10 +91,14 @@ const MapWithIcons = ({ socket: propSocket }) => {
       
       // Restore missiles that are still in flight
       if (data.missiles && data.missiles.length > 0) {
+        const BINT_JBEIL_SOURCE = [35.43, 33.12];
         const restoredMissiles = data.missiles
           .filter(m => m.progress < 1 && !m.fading)
           .map(m => ({
             ...m,
+            // Override source to always be Bint Jbeil (land-based, no sea launches)
+            source: BINT_JBEIL_SOURCE,
+            sourcePosition: BINT_JBEIL_SOURCE,
             // Adjust timestamps so missile continues from correct position
             clientStartTime: (m.clientStartTime || m.timestamp) + timeAway,
             timestamp: m.timestamp + timeAway
