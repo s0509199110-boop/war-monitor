@@ -135,39 +135,16 @@ function calculateDistanceKm([lng1, lat1], [lng2, lat2]) {
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+// Bint Jbeil (בינת ג'בל) - South Lebanon, land-based only
+const BINT_JBEIL_ANCHOR_OREF = { lat: 33.12, lng: 35.43 };
+
 function estimateLaunchSource([targetLng, targetLat]) {
-  if (targetLat > 32.8) {
-    return {
-      coordinates: [35.4, 33.3],
-      confidence: 'high',
-      source: 'דרום לבנון',
-      threat: 'רקטות וטילים קצרי טווח',
-    };
-  }
-
-  if (targetLat < 31.0) {
-    if (targetLng > 35.0) {
-      return {
-        coordinates: [44.2, 15.4],
-        confidence: 'medium',
-        source: 'תימן / חות׳ים',
-        threat: 'טילים בליסטיים וכטב״מים',
-      };
-    }
-
-    return {
-      coordinates: [34.3, 31.4],
-      confidence: 'high',
-      source: 'רצועת עזה',
-      threat: 'רקטות קצרות טווח',
-    };
-  }
-
+  // ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
   return {
-    coordinates: [51.7, 32.6],
-    confidence: 'medium',
-    source: 'איראן / עיראק',
-    threat: 'טילים בליסטיים ארוכי טווח',
+    coordinates: [BINT_JBEIL_ANCHOR_OREF.lng, BINT_JBEIL_ANCHOR_OREF.lat],
+    confidence: 'high',
+    source: 'דרום לבנון (בינת ג\'בל)',
+    threat: 'רקטות וטילים',
   };
 }
 

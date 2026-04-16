@@ -20,45 +20,15 @@ const { startOrefService } = require('./OrefAlertService');
  * @param {number} targetLng - ׳§׳• ׳׳•׳¨׳ ׳©׳ ׳”׳׳˜׳¨׳”
  * @returns {Object} - ׳׳•׳‘׳™׳™׳§׳˜ ׳¢׳ sourceLat, sourceLng, sourceName
  */
+// Bint Jbeil (בינת ג'בל) - South Lebanon, land-based only
+const BINT_JBEIL_ANCHOR = { lat: 33.12, lng: 35.43 };
+
 function estimateMissileSource(targetLat, targetLng) {
-  // ׳׳‘׳ ׳•׳ (׳¦׳₪׳•׳ ׳™׳©׳¨׳׳)
-  if (targetLat > 32.8) {
-    return {
-      sourceLat: 33.8 + (Math.random() - 0.5) * 0.3,
-      sourceLng: 35.5 + (Math.random() - 0.5) * 0.5,
-      sourceName: '׳׳‘׳ ׳•׳',
-      sourceCountry: 'LB',
-      missileType: '׳¨׳§׳˜׳”/׳˜׳™׳ ׳ "׳˜'
-    };
-  }
-  
-  // ׳¢׳–׳”/׳“׳¨׳•׳ (׳“׳¨׳•׳ ׳™׳©׳¨׳׳)
-  if (targetLat < 31.2) {
-    return {
-      sourceLat: 31.3 + (Math.random() - 0.5) * 0.4,
-      sourceLng: 34.3 + (Math.random() - 0.5) * 0.5,
-      sourceName: '׳¨׳¦׳•׳¢׳× ׳¢׳–׳”',
-      sourceCountry: 'GZ',
-      missileType: '׳¨׳§׳˜׳”'
-    };
-  }
-  
-  // ׳×׳™׳׳ (׳“׳¨׳•׳ ׳׳׳•׳“)
-  if (targetLat < 30.0) {
-    return {
-      sourceLat: 15.3 + (Math.random() - 0.5) * 1.0,
-      sourceLng: 44.2 + (Math.random() - 0.5) * 1.0,
-      sourceName: '׳×׳™׳׳',
-      sourceCountry: 'YE',
-      missileType: '׳˜׳™׳ ׳‘׳׳™׳¡׳˜׳™'
-    };
-  }
-  
-  // ברירת מחדל: לבנון (לא איראן/עיראק - מושבת לפי דרישה)
+  // ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
   return {
-    sourceLat: 33.8 + (Math.random() - 0.5) * 0.3,
-    sourceLng: 35.5 + (Math.random() - 0.5) * 0.5,
-    sourceName: 'לבנון',
+    sourceLat: BINT_JBEIL_ANCHOR.lat + (Math.random() - 0.5) * 0.05,
+    sourceLng: BINT_JBEIL_ANCHOR.lng + (Math.random() - 0.5) * 0.05,
+    sourceName: 'לבנון (בינת ג\'בל)',
     sourceCountry: 'LB',
     missileType: 'רקטה/טיל נ"ט'
   };
@@ -76,13 +46,13 @@ function estimateMissileSource(targetLat, targetLng) {
 function createMissileLaunchEvent(alert) {
   const targetLat = alert.lat || alert.latitude;
   const targetLng = alert.lng || alert.longitude;
+  
+  // ALWAYS use Bint Jbeil (בינת ג'בל) - land-based, no sea launches
   const source = estimateMissileSource(targetLat, targetLng);
   
   const now = Date.now();
-  const flightDuration = targetLat > 32.8 ? 12000 : // ׳׳‘׳ ׳•׳ - 12 ׳©׳ ׳™׳•׳×
-                        targetLat < 31.2 ? 15000 :   // ׳¢׳–׳” - 15 ׳©׳ ׳™׳•׳×
-                        targetLat < 30.0 ? 180000 :  // ׳×׳™׳׳ - 3 ׳“׳§׳•׳×
-                        90000;                        // ׳׳™׳¨׳׳ - ׳“׳§׳” ׳•׳—׳¦׳™
+  // Consistent flight duration for Lebanon (Bint Jbeil) - ~12 seconds
+  const flightDuration = 12000;
   
   return {
     id: `missile-${now}-${Math.random().toString(36).substr(2, 9)}`,
@@ -91,7 +61,7 @@ function createMissileLaunchEvent(alert) {
     sourceName: source.sourceName,
     sourceCountry: source.sourceCountry,
     missileType: source.missileType,
-    targetName: alert.name || alert.city || '׳׳–׳•׳¨ ׳׳ ׳™׳“׳•׳¢',
+    targetName: alert.name || alert.city || 'אזור לא ידוע',
     timestamp: now,
     duration: flightDuration,
     status: 'in_flight'

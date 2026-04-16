@@ -3126,11 +3126,9 @@ function resolveSourceRegionFromAlert(alert, sourcePosition, targetPosition) {
   );
 }
 
+// Bint Jbeil (בינת ג'בל) ONLY - land-based, no sea launches
 const THREAT_LAUNCH_CANDIDATES = [
-  { lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat, frac: 0.12 },
-  { lng: 44.2, lat: 15.35, frac: 0.055 },
-  { lng: 44.58, lat: 33.32, frac: 0.13 },
-  { lng: 51.28, lat: 32.52, frac: 0.11 },
+  { lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat, frac: 0.12 }
 ];
 
 /**
@@ -3155,19 +3153,9 @@ function getSourcePositionNearestThreatArc(targetPosition) {
 
 function getSourcePositionStrategic(targetPosition, axis, threatType) {
   let effAxis = String(axis).toLowerCase();
-  if (effAxis === 'iran') effAxis = 'yemen';
-  if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && effAxis === 'gaza') effAxis = 'yemen';
-  if (effAxis === 'syria') effAxis = 'lebanon';
+  // ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
   const isUav = threatType === 'uav';
-  const anchors = {
-    iran: { lng: 51.28, lat: 32.52, frac: isUav ? 0.09 : 0.11 },
-    iraq: { lng: 44.58, lat: 33.32, frac: isUav ? 0.12 : 0.14 },
-    yemen: { lng: 44.2, lat: 15.35, frac: isUav ? 0.05 : 0.055 },
-    lebanon: { lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat, frac: isUav ? 0.1 : 0.12 },
-  };
-  const a = anchors[effAxis];
-  if (!a) return getSourcePositionNearestThreatArc(targetPosition);
-  return [a.lng, a.lat];
+  return [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
 }
 
 /**
