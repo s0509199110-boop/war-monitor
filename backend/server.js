@@ -2075,32 +2075,12 @@ function clampTargetLngLatToSupportedRegion(alert, targetPosition) {
 /**
  * ׳¨׳§ ׳©׳™׳’׳•׳¨׳™׳ ׳›׳׳₪׳™ ׳™׳©׳¨׳׳: ׳׳×׳§׳ ׳”׳—׳׳₪׳× ׳׳•׳¦׳/׳™׳¢׳“, ׳™׳¢׳“ ׳׳—׳•׳¥ ׳׳׳¨׳¥, ׳•׳׳•׳¦׳ ׳©׳ ׳•׳₪׳ ׳‘׳×׳•׳ ׳™׳©׳¨׳׳ (׳׳—׳©׳‘ ׳׳—׳“׳© ׳׳—׳•׳¥ ׳׳׳¨׳¥).
  */
+// ALWAYS return Bint Jbeil (בינת ג'בל) as source - land-based, no sea launches
 function normalizeMissileEndpointsForInbound(alert, sourcePosition, targetPosition) {
-  const threatType = alert?.threatType || 'missile';
   let tgt = normalizeLngLat(targetPosition);
-  let src = normalizeLngLat(sourcePosition);
-  if (threatType === 'uav') {
-    tgt = clampTargetLngLatToSupportedRegion(alert, tgt);
-    // For UAVs, source should be OUTSIDE Israel, so resolve if NOT a plausible target
-    if (!isPlausibleSupportedAlertTarget(src[0], src[1])) {
-      src = resolveSourcePosition(alert, tgt);
-    }
-    return { sourcePosition: src, targetPosition: tgt };
-  }
-  let tIn = isPlausibleSupportedAlertTarget(tgt[0], tgt[1]);
-  let sIn = isPlausibleSupportedAlertTarget(src[0], src[1]);
-  if (tIn && sIn) {
-    src = resolveSourcePosition(alert, tgt);
-  } else if (!tIn && sIn) {
-    const sx = src[0];
-    const sy = src[1];
-    src = [tgt[0], tgt[1]];
-    tgt = [sx, sy];
-  }
   tgt = clampTargetLngLatToSupportedRegion(alert, tgt);
-  if (isPlausibleSupportedAlertTarget(src[0], src[1])) {
-    src = resolveSourcePosition(alert, tgt);
-  }
+  // ALWAYS use Bint Jbeil as source
+  const src = [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
   return { sourcePosition: src, targetPosition: tgt };
 }
 
@@ -3131,24 +3111,9 @@ const THREAT_LAUNCH_CANDIDATES = [
   { lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat, frac: 0.12 }
 ];
 
-/**
- * ׳›׳©׳׳™׳ ׳‘ײ¾Oref ׳¦׳™׳¨ ׳׳₪׳•׳¨׳© ג€” ׳‘׳•׳—׳¨׳™׳ ׳¢׳•׳’׳ ׳׳™׳•׳ ׳’׳׳•׳’׳¨׳₪׳™׳× ׳”׳§׳¨׳•׳‘ ׳׳™׳¢׳“ (׳›׳ ׳¢׳™׳¨ ׳‘׳™׳©׳¨׳׳ ׳™׳›׳•׳׳” ׳׳§׳‘׳ ׳׳¡׳׳•׳ ׳׳›׳ ׳›׳™׳•׳•׳ ׳›׳©׳”׳˜׳§׳¡׳˜ ׳׳’׳“׳™׳¨).
- */
+// ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
 function getSourcePositionNearestThreatArc(targetPosition) {
-  const [tlng, tlat] = normalizeLngLat(targetPosition);
-  if (!isPlausibleSupportedAlertTarget(tlng, tlat)) {
-    return [35.5, 33.8]; /* Default to Lebanon - most launches are from Lebanon */
-  }
-  let bestPt = THREAT_LAUNCH_CANDIDATES[0];
-  let bestD = Infinity;
-  for (const c of THREAT_LAUNCH_CANDIDATES) {
-    const d = haversineKm([c.lng, c.lat], [tlng, tlat]);
-    if (d < bestD) {
-      bestD = d;
-      bestPt = c;
-    }
-  }
-  return [bestPt.lng, bestPt.lat];
+  return [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
 }
 
 function getSourcePositionStrategic(targetPosition, axis, threatType) {
@@ -3161,90 +3126,19 @@ function getSourcePositionStrategic(targetPosition, axis, threatType) {
 /**
  * ׳׳™׳§׳•׳ ׳׳•׳¦׳: ׳§׳•׳“׳ ׳›׳ ׳׳₪׳™׳§׳•׳“ ׳”׳¢׳•׳¨׳£ (׳˜׳§׳¡׳˜ ׳׳׳), ׳׳—׳¨ ׳›׳ OREF_DEFAULT_THREAT_AXIS ׳‘׳¡׳‘׳™׳‘׳”, ׳׳—׳¨ ׳›׳ ׳¢׳•׳’׳ ׳§׳¨׳•׳‘ (׳׳ "׳—׳™׳₪׳”=׳¨׳§ ׳׳‘׳ ׳•׳").
  */
+// ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
 function resolveSourcePosition(alert, targetPosition) {
-  if (launchAiGeometryPreferred(alert)) {
-    let eff = String(alert.launchAiAxis).toLowerCase();
-    if (eff === 'iran') eff = 'yemen';
-    if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && eff === 'gaza') eff = 'yemen';
-    if (eff === 'syria') eff = 'lebanon';
-    return getSourcePositionStrategic(targetPosition, eff, alert?.threatType);
-  }
-  const envRaw = process.env.OREF_DEFAULT_THREAT_AXIS;
-  const envAxisRaw =
-    envRaw && ['iran', 'iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(envRaw).toLowerCase())
-      ? String(envRaw).toLowerCase()
-      : null;
-  let envAxis = envAxisRaw;
-  if (envAxis === 'iran') envAxis = 'yemen';
-  if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && envAxis === 'gaza') envAxis = 'yemen';
-  const inferred = inferOrefThreatAxis(alert);
-  let inferredEff = inferred;
-  if (inferredEff === 'iran') inferredEff = 'yemen';
-  const axis = (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && inferred === 'gaza' ? 'yemen' : inferredEff) || envAxis;
-  if (axis) {
-    const axisEff = applyCeasefireBallisticLaunchPrior(alert, axis);
-    return getSourcePositionStrategic(targetPosition, axisEff, alert?.threatType);
-  }
-  const osintAxis = getCorroboratedOsintAxis(alert);
-  if (osintAxis) {
-    let oAx = osintAxis === 'iran' ? 'yemen' : osintAxis;
-    if (GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && oAx === 'gaza') oAx = 'yemen';
-    const oEff = applyCeasefireBallisticLaunchPrior(alert, oAx);
-    return getSourcePositionStrategic(targetPosition, oEff, alert?.threatType);
-  }
-  if (
-    alert.telegramAiAxis &&
-    ['iraq', 'yemen', 'lebanon', 'gaza', 'syria'].includes(String(alert.telegramAiAxis)) /* Iran disabled */ &&
-    Number(alert.telegramAiConfidence) >= 0.7
-  ) {
-    const tgAx = String(alert.telegramAiAxis);
-    const tgEff = applyCeasefireBallisticLaunchPrior(
-      alert,
-      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && tgAx === 'gaza' ? 'yemen' : tgAx === 'iran' ? 'yemen' : tgAx
-    );
-    return getSourcePositionStrategic(targetPosition, tgEff, alert?.threatType);
-  }
-  const gdAxis = getGdeltCorroborationAxisSync(alert);
-  if (gdAxis) {
-    const gEff = applyCeasefireBallisticLaunchPrior(
-      alert,
-      GAZA_BALLISTIC_MAP_ORIGIN_DISABLED && gdAxis === 'gaza' ? 'yemen' : gdAxis === 'iran' ? 'yemen' : gdAxis
-    );
-    return getSourcePositionStrategic(targetPosition, gEff, alert?.threatType);
-  }
-  return getSourcePosition(targetPosition);
+  return [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
 }
 
+// ALWAYS return Bint Jbeil (בינת ג'בל) - land-based, no sea launches
 function getSourcePosition(targetPosition) {
-  const [lng, lat] = normalizeLngLat(targetPosition);
-  const inSupportedRegion = isPlausibleSupportedAlertTarget(lng, lat);
-
-  if (inSupportedRegion) {
-    return getSourcePositionNearestThreatArc(targetPosition);
-  }
-  return getSourcePositionNearestThreatArc(targetPosition);
+  return [LEBANON_ROUTE_ANCHOR.lng, LEBANON_ROUTE_ANCHOR.lat];
 }
 
+// ALWAYS return 'lebanon' (Bint Jbeil) - land-based, no sea launches
 function getSourceRegion(sourcePosition, targetPosition) {
-  const [sourceLng, sourceLat] = normalizeLngLat(sourcePosition);
-  const anchors = [
-    { region: 'lebanon', lng: LEBANON_ROUTE_ANCHOR.lng, lat: LEBANON_ROUTE_ANCHOR.lat },
-    ...(GAZA_BALLISTIC_MAP_ORIGIN_DISABLED ? [] : [{ region: 'gaza', lng: 34.35, lat: 31.35 }]),
-    { region: 'yemen', lng: 44.2, lat: 15.35 },
-    { region: 'iraq', lng: 44.58, lat: 33.32 },
-  ];
-
-  let best = anchors[0];
-  let bestDistance = Infinity;
-  for (const anchor of anchors) {
-    const d = haversineKm([sourceLng, sourceLat], [anchor.lng, anchor.lat]);
-    if (d < bestDistance) {
-      bestDistance = d;
-      best = anchor;
-    }
-  }
-
-  return best.region;
+  return 'lebanon';
 }
 
 function haversineKm([lng1, lat1], [lng2, lat2]) {
