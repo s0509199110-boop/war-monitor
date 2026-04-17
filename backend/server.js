@@ -33,7 +33,14 @@ function isTzofarBackupEnvEnabled() {
 }
 
 const { getServiceStatus } = require('./OrefAlertService');
-const { startNewsService, getNews, getNewsStoreWarRelatedBlob, newsStore } = require('./NewsService');
+const { 
+  startNewsService, 
+  getNews, 
+  getNewsStoreWarRelatedBlob, 
+  newsStore,
+  getVerifiedImpacts,
+  scanArticleForImpacts 
+} = require('./NewsService');
 const {
   getCityCoordinates,
   getDefaultCoordinates,
@@ -295,6 +302,7 @@ const state = {
   predictionMarketsSnapshot: { markets: [], escalationScore: 0, updatedAt: 0 },
   osintImpacts: [],
   osintImpactRegistry: {},
+  verifiedImpacts: [], // Impact Detection - נפילות מאומתות מ-3 מקורות
 };
 
 /** פיד פיקוד: 12 שעות אחורה; מעל מגבלת הפריטים — מוחקים מהכי ישן, עם העדפת שמירה על שורות איום */
@@ -6142,6 +6150,7 @@ function emitSnapshot(socket) {
     socket.emit('fires_update', state.fires);
     socket.emit('ships_update', state.ships);
     socket.emit('osint_impacts_update', state.osintImpacts || []);
+    socket.emit('verified_impacts_list', state.verifiedImpacts || []);
 
     const news = getNews(20);
     if (news.length > 0) {
@@ -7282,6 +7291,59 @@ server.listen(PORT, LISTEN_HOST, async () => {
   }
 
   startNewsService(io);
+  
+  // ==========================================
+  // IMPACT DETECTION - סריקת מאמרים לזיהוי נפילות
+  // ==========================================
+  function scanNewsForImpacts() {
+    try {
+      const articles = newsStore.get ? newsStore.get() : [];
+      let newVerifiedImpacts = [];
+      
+      for (const article of articles) {
+        const detection = scanArticleForImpacts(article);
+        if (detection && detection.newlyVerified) {
+          newVerifiedImpacts.push({
+            cityName: detection.cityName,
+            sources: detection.sources,
+            timestamp: Date.now(),
+            article: {
+              title: article.title,
+              source: article.source || article.feedName,
+              link: article.link
+            }
+          });
+        }
+      }
+      
+      // Send verified impacts to all clients
+      if (newVerifiedImpacts.length > 0) {
+        console.log(`[Impact Detection] Broadcasting ${newVerifiedImpacts.length} verified impacts`);
+        for (const impact of newVerifiedImpacts) {
+          io.emit('verified_impact', impact);
+          
+          // Also add to state for persistence
+          if (!state.verifiedImpacts) state.verifiedImpacts = [];
+          state.verifiedImpacts.push(impact);
+          
+          // Keep only last 50 impacts
+          if (state.verifiedImpacts.length > 50) {
+            state.verifiedImpacts = state.verifiedImpacts.slice(-50);
+          }
+        }
+      }
+      
+      return newVerifiedImpacts.length;
+    } catch (error) {
+      console.log('[Impact Detection] Error scanning:', error.message);
+      return 0;
+    }
+  }
+  
+  // Scan every 60 seconds
+  setInterval(scanNewsForImpacts, 60_000);
+  console.log('[Impact Detection] Impact scanning enabled - checking every 60 seconds for verified impacts (min 3 sources)');
+  
   startExternalPolling();
 
   if (tzofarBackupClient) {

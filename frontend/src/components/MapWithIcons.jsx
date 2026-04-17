@@ -32,6 +32,58 @@ const MapWithIcons = ({ socket: propSocket }) => {
   const [activeMissiles, setActiveMissiles] = useState([]);
   const [intercepts, setIntercepts] = useState([]);
   const [impacts, setImpacts] = useState([]);
+  const [verifiedImpacts, setVerifiedImpacts] = useState([]); // Impact Detection - נפילות מאומתות מ-3 מקורות
+  
+  // Helper function to get city coordinates for verified impacts
+  const getCityCoordinates = useCallback((cityName) => {
+    // Simple coordinate lookup for major Israeli cities
+    const cityCoords = {
+      'תל אביב': { lng: 34.7818, lat: 32.0853 },
+      'חיפה': { lng: 34.9896, lat: 32.7940 },
+      'ירושלים': { lng: 35.2137, lat: 31.7683 },
+      'אשקלון': { lng: 34.5715, lat: 31.6688 },
+      'אשדוד': { lng: 34.6553, lat: 31.8014 },
+      'נתניה': { lng: 34.8621, lat: 32.3329 },
+      'באר שבע': { lng: 34.7915, lat: 31.2518 },
+      'רמת גן': { lng: 34.8245, lat: 32.0684 },
+      'גבעתיים': { lng: 34.8123, lat: 32.0693 },
+      'הרצליה': { lng: 34.8353, lat: 32.1624 },
+      'קרית שמונה': { lng: 35.5721, lat: 33.2079 },
+      'צפת': { lng: 34.9644, lat: 32.9646 },
+      'נהריה': { lng: 35.0980, lat: 33.0067 },
+      'עכו': { lng: 35.0822, lat: 32.9278 },
+      'טבריה': { lng: 35.5395, lat: 32.7923 },
+      'עפולה': { lng: 35.2968, lat: 32.6100 },
+      'בית שאן': { lng: 35.4986, lat: 32.5000 },
+      'עכו': { lng: 35.0822, lat: 32.9278 },
+      'כרמיאל': { lng: 35.3035, lat: 32.9131 },
+      'מעלות תרשיחא': { lng: 35.2906, lat: 33.0169 },
+      'ראש פינה': { lng: 35.5470, lat: 32.9688 },
+      'ראשון לציון': { lng: 34.8011, lat: 31.9614 },
+      'חולון': { lng: 34.7792, lat: 32.0158 },
+      'בת ים': { lng: 34.7523, lat: 32.0171 },
+      'פתח תקווה': { lng: 34.8878, lat: 32.0871 },
+      'רעננה': { lng: 34.8746, lat: 32.1831 },
+      'הוד השרון': { lng: 34.8883, lat: 32.1565 },
+      'כפר סבא': { lng: 34.9061, lat: 32.1782 },
+      'נשר': { lng: 35.0496, lat: 32.7645 },
+      'טירת כרמל': { lng: 34.9722, lat: 32.7657 },
+    };
+    
+    // Exact match
+    if (cityCoords[cityName]) {
+      return cityCoords[cityName];
+    }
+    
+    // Try to match partial names
+    for (const [name, coords] of Object.entries(cityCoords)) {
+      if (cityName.includes(name) || name.includes(cityName)) {
+        return coords;
+      }
+    }
+    
+    return null;
+  }, []);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true); // Auto-zoom to new threats
   const [isDarkMode, setIsDarkMode] = useState(true); // Day/night mode
@@ -557,6 +609,26 @@ const MapWithIcons = ({ socket: propSocket }) => {
     socket.on('missile_update', onMissileUpdate);
     socket.on('clear_city_alert', onClearCityAlert);
     socket.on('clear_all_threats', onClearAllThreats);
+    
+    // Impact Detection - נפילות מאומתות
+    const onVerifiedImpact = (impact) => {
+      console.log('[Verified Impact] New impact detected:', impact.cityName, 'sources:', impact.sources?.length);
+      setVerifiedImpacts(prev => {
+        // Avoid duplicates
+        if (prev.some(p => p.cityName === impact.cityName && p.timestamp === impact.timestamp)) {
+          return prev;
+        }
+        return [...prev, impact].slice(-50); // Keep last 50
+      });
+    };
+    
+    const onVerifiedImpactsList = (impacts) => {
+      console.log('[Verified Impacts List] Received', impacts?.length, 'impacts');
+      setVerifiedImpacts(impacts || []);
+    };
+    
+    socket.on('verified_impact', onVerifiedImpact);
+    socket.on('verified_impacts_list', onVerifiedImpactsList);
 
     return () => {
       socket.off('map_entities_update', onMapEntities);
@@ -565,6 +637,8 @@ const MapWithIcons = ({ socket: propSocket }) => {
       socket.off('missile_update', onMissileUpdate);
       socket.off('clear_city_alert', onClearCityAlert);
       socket.off('clear_all_threats', onClearAllThreats);
+      socket.off('verified_impact', onVerifiedImpact);
+      socket.off('verified_impacts_list', onVerifiedImpactsList);
     };
   }, [propSocket]);
 
@@ -1339,6 +1413,54 @@ const MapWithIcons = ({ socket: propSocket }) => {
     });
   }, [impacts, currentTime, formatSourceRegion, isMobile]);
 
+  // Layer 6b: VERIFIED IMPACTS - נפילות מאומתות מ-3 מקורות
+  const verifiedImpactLayer = useMemo(() => {
+    // Convert verified impacts to map markers
+    const verifiedImpactMarkers = verifiedImpacts.map(impact => {
+      // Try to get coordinates for the city
+      const cityCoords = getCityCoordinates ? getCityCoordinates(impact.cityName) : null;
+      if (!cityCoords) return null;
+      
+      return {
+        id: `verified-impact-${impact.cityName}-${impact.timestamp}`,
+        position: [cityCoords.lng, cityCoords.lat],
+        cityName: impact.cityName,
+        sources: impact.sources,
+        confidence: impact.confidence,
+        timestamp: impact.timestamp,
+        article: impact.article
+      };
+    }).filter(Boolean);
+    
+    return new ScatterplotLayer({
+      id: 'verified-impact-layer',
+      data: verifiedImpactMarkers,
+      getPosition: (d) => d.position,
+      getFillColor: [255, 50, 50, 220], // Red for verified impact
+      getLineColor: [255, 100, 100, 200],
+      getRadius: () => 4500,
+      radiusMinPixels: isMobile ? 15 : 10,
+      radiusMaxPixels: isMobile ? 30 : 25,
+      stroked: true,
+      filled: true,
+      lineWidthMinPixels: 3,
+      pickable: true,
+      onHover: (info) => {
+        if (!info.object) return null;
+        return {
+          html: `
+            <div style="background:rgba(6,10,16,0.94);border:2px solid rgba(255,50,50,0.9);padding:10px 12px;border-radius:6px;color:white;font-size:12px;min-width:200px;">
+              <div style="font-weight:700;color:#ff3333;margin-bottom:6px;">💥 נפילה מאומתת</div>
+              <div style="font-weight:600;margin-bottom:4px;">${info.object.cityName}</div>
+              <div style="font-size:11px;color:#aaa;margin-bottom:4px;">מאומת מ-${info.object.sources?.length || 0} מקורות</div>
+              <div style="font-size:10px;color:#888;">${info.object.article?.source || ''}</div>
+            </div>
+          `
+        };
+      }
+    });
+  }, [verifiedImpacts, isMobile, getCityCoordinates]);
+
   // Layer 7: Map entities (flights, etc.)
   const iconLayer = useMemo(() => {
     return new IconLayer({
@@ -1374,7 +1496,8 @@ const MapWithIcons = ({ socket: propSocket }) => {
     smallMissileLayer,      // Small missiles (after split to each city)
     clusterLayer,           // Cluster bomb sub-missiles
     interceptLayer,
-    impactPulseLayer
+    impactPulseLayer,
+    verifiedImpactLayer     // VERIFIED IMPACTS - נפילות מאומתות מ-3 מקורות
   ];
 
   const onViewStateChange = useCallback(({ viewState: vs }) => {

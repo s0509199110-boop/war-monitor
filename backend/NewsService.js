@@ -650,6 +650,260 @@ function getNews(limit = 50) {
   }
 }
 
+// ==========================================
+// IMPACT DETECTION SYSTEM - זיהוי נפילות טילים
+// ==========================================
+
+// מילות מפתח לזיהוי נפילות בערים
+const IMPACT_KEYWORDS = {
+  hebrew: [
+    // נפילות ישירות
+    'נפילה', 'נפילות', 'פגיעה', 'פגיעות', 'פגיעת', 'נפילת',
+    'הנפילה', 'הנפילות', 'הפגיעה', 'הפגיעות',
+    // פגיעות טילים
+    'פגיעת טיל', 'פגיעת רקטה', 'פגיעת טילים', 'פגיעת רקטות',
+    'נפילת טיל', 'נפילת רקטה', 'נפילות טילים', 'נפילות רקטות',
+    // נזק וחורבן
+    'הרס', 'חורבן', 'נזק כבד', 'נזק משמעותי', 'פגיעה ישירה',
+    // פגיעה במבנים
+    'פגיעה בבית', 'פגיעה בבתים', 'פגיעה במבנה', 'פגיעה במבנים',
+    'נפילה בבית', 'נפילה בבתים', 'נפילה במבנה', 'נפילה במבנים',
+    // פגיעה ברכב
+    'פגיעה ברכב', 'פגיעה במכונית', 'נפילה על רכב', 'נפילה על מכונית',
+    // פגיעה בחוף/ים
+    'פגיעה בחוף', 'נפילה בחוף', 'פגיעה בים', 'נפילה בים',
+    // נפגעים
+    'נפגע', 'נפגעים', 'פצוע', 'פצועים', 'הרוג', 'הרוגים',
+    // התרסקות
+    'התרסק', 'התרסקות', 'התרסקה', 'התרסקו',
+    // אירועים חריגים
+    'בלון תבערה', 'בלוני תבערה', 'שריפה פרצה', 'שריפה ב',
+    // שיגורים שנפלו
+    'שיגור שנפל', 'שיגורים שנפלו', 'רקטה שנפלה', 'טיל שנפל',
+  ],
+  english: [
+    'impact', 'impacted', 'hit', 'struck', 'strike',
+    'rocket landed', 'missile landed', 'shell landed',
+    'direct hit', 'building hit', 'house hit', 'car hit',
+    'damage', 'damaged', 'destruction', 'destroyed',
+    'casualties', 'injured', 'wounded', 'killed',
+    'fire broke out', 'fires started',
+    'balloon fire', 'incendiary balloon',
+    'interception failed', 'failed to intercept',
+  ],
+  // מילות שלילה - לא נפילה
+  negative: [
+    'יורט', 'יורטה', 'יורטו', 'יירוט', 'יירוטים', 'ניתרצ',
+    'ניטרל', 'נטרלו', 'נטרלה', 'נטרל',
+    'intercepted', 'interception', 'shot down', 'neutralized',
+    'בשטח פתוח', 'שטח פתוח', 'open area', 'field',
+  ]
+};
+
+// מטמון נפילות מאומתות
+const verifiedImpacts = new Map(); // cityName -> { count, sources, timestamp, confidence }
+const IMPACT_VERIFICATION_THRESHOLD = 3; // מינימום 3 מקורות
+const IMPACT_WINDOW_MS = 30 * 60 * 1000; // 30 דקות
+
+/**
+ * מזהה אם יש נפילה בטקסט ומחזיר את העיר הרלוונטית
+ */
+function detectImpactInText(text, title = '', cityName = null) {
+  if (!text && !title) return null;
+  
+  const combinedText = `${title} ${text}`.toLowerCase();
+  
+  // בדיקת מילות שלילה קודם
+  for (const negKeyword of IMPACT_KEYWORDS.negative) {
+    if (combinedText.includes(negKeyword.toLowerCase())) {
+      return null; // זה לא נפילה, זה יירוט או שטח פתוח
+    }
+  }
+  
+  // בדיקת מילות נפילה
+  let isImpact = false;
+  let matchedKeyword = '';
+  
+  for (const keyword of [...IMPACT_KEYWORDS.hebrew, ...IMPACT_KEYWORDS.english]) {
+    if (combinedText.includes(keyword.toLowerCase())) {
+      isImpact = true;
+      matchedKeyword = keyword;
+      break;
+    }
+  }
+  
+  if (!isImpact) return null;
+  
+  // אם יש שם עיר, החזר אותה
+  if (cityName) {
+    return {
+      detected: true,
+      cityName: cityName,
+      keyword: matchedKeyword,
+      confidence: 'explicit_city'
+    };
+  }
+  
+  // נסה לזהות עיר מהטקסט
+  const detectedCity = extractCityFromImpactText(combinedText);
+  
+  if (detectedCity) {
+    return {
+      detected: true,
+      cityName: detectedCity,
+      keyword: matchedKeyword,
+      confidence: 'extracted'
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * מנסה לחלץ שם עיר מטקסט נפילה
+ */
+function extractCityFromImpactText(text) {
+  // תבניות נפוצות: "נפילה ב[עיר]", "פגיעה ב[עיר]", "פגיעת טיל ב[עיר]"
+  const patterns = [
+    /נפילה ב(קרי[י]?ת [\u0590-\u05FF]+)/,
+    /פגיעה ב(קרי[י]?ת [\u0590-\u05FF]+)/,
+    /נפילה ב([\u0590-\u05FF]{2,20})/,
+    /פגיעה ב([\u0590-\u05FF]{2,20})/,
+    /פגיעת טיל ב([\u0590-\u05FF]{2,20})/,
+    /פגיעת רקטה ב([\u0590-\u05FF]{2,20})/,
+    /נפילת טיל ב([\u0590-\u05FF]{2,20})/,
+    /נפל ב([\u0590-\u05FF]{2,20})/,
+    /הרוג ב([\u0590-\u05FF]{2,20})/,
+    /נפגע ב([\u0590-\u05FF]{2,20})/,
+    /פגיעה ישירה ב([\u0590-\u05FF]{2,20})/,
+    /נזק ב([\u0590-\u05FF]{2,20})/,
+    /שריפה ב([\u0590-\u05FF]{2,20})/,
+    // English patterns
+    /impact in ([a-zA-Z\s]{3,30})/i,
+    /hit in ([a-zA-Z\s]{3,30})/i,
+    /struck ([a-zA-Z\s]{3,30})/i,
+    /landed in ([a-zA-Z\s]{3,30})/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * מוסיף נפילה למערכת האימות
+ */
+function addImpactReport(cityName, source, articleId, timestamp = Date.now()) {
+  if (!cityName || !source) return null;
+  
+  const key = cityName;
+  const existing = verifiedImpacts.get(key);
+  
+  if (!existing) {
+    // נפילה חדשה
+    const impactData = {
+      cityName: cityName,
+      sources: [source],
+      articleIds: [articleId],
+      firstReported: timestamp,
+      lastUpdated: timestamp,
+      verified: false,
+      confidence: 1
+    };
+    verifiedImpacts.set(key, impactData);
+    return impactData;
+  }
+  
+  // הוסף מקור חדש אם לא קיים
+  if (!existing.sources.includes(source)) {
+    existing.sources.push(source);
+    existing.articleIds.push(articleId);
+    existing.confidence = existing.sources.length;
+    existing.lastUpdated = timestamp;
+    
+    // אימות - צריך לפחות 3 מקורות
+    if (existing.sources.length >= IMPACT_VERIFICATION_THRESHOLD && !existing.verified) {
+      existing.verified = true;
+      console.log(`[Impact Detection] ✅ VERIFIED: Impact in ${cityName} with ${existing.sources.length} sources`);
+      return { ...existing, newlyVerified: true };
+    }
+  }
+  
+  return existing;
+}
+
+/**
+ * מחזיר את כל הנפילות המאומתות
+ */
+function getVerifiedImpacts(minConfidence = IMPACT_VERIFICATION_THRESHOLD) {
+  const now = Date.now();
+  const results = [];
+  
+  for (const [cityName, impact] of verifiedImpacts) {
+    // נקה נפילות ישנות (מעל 30 דקות)
+    if (now - impact.lastUpdated > IMPACT_WINDOW_MS) {
+      verifiedImpacts.delete(cityName);
+      continue;
+    }
+    
+    if (impact.confidence >= minConfidence) {
+      results.push({
+        cityName: cityName,
+        sources: impact.sources,
+        confidence: impact.confidence,
+        verified: impact.verified,
+        timestamp: impact.firstReported,
+        articleIds: impact.articleIds
+      });
+    }
+  }
+  
+  return results.sort((a, b) => b.timestamp - a.timestamp);
+}
+
+/**
+ * סורק מאמר ומזהה נפילות
+ */
+function scanArticleForImpacts(article) {
+  if (!article) return null;
+  
+  const title = article.title || '';
+  const description = article.description || '';
+  const source = article.source || article.feedName || 'unknown';
+  const articleId = article.id || article.link || `${source}-${Date.now()}`;
+  
+  const detection = detectImpactInText(description, title);
+  
+  if (detection && detection.cityName) {
+    const impact = addImpactReport(detection.cityName, source, articleId);
+    
+    if (impact && impact.newlyVerified) {
+      return {
+        detected: true,
+        cityName: detection.cityName,
+        verified: true,
+        sources: impact.sources,
+        article: article
+      };
+    }
+    
+    return {
+      detected: true,
+      cityName: detection.cityName,
+      verified: false,
+      currentConfidence: impact.confidence,
+      needed: IMPACT_VERIFICATION_THRESHOLD
+    };
+  }
+  
+  return null;
+}
+
 let fetchInterval = null;
 
 function startNewsService(io) {
@@ -699,4 +953,81 @@ module.exports = {
   getNews,
   getNewsStoreWarRelatedBlob,
   newsStore,
+  // Impact Detection exports
+  detectImpactInText,
+  extractCityFromImpactText,
+  addImpactReport,
+  getVerifiedImpacts,
+  scanArticleForImpacts,
+  IMPACT_VERIFICATION_THRESHOLD,
 };
+
+// ==========================================
+// NEW NEWS SOURCES - מקורות חדשות נוספים
+// ==========================================
+const ADDITIONAL_NEWS_SOURCES = [
+  // מקורות ישראליים נוספים
+  { name: '0404', url: 'https://www.0404.co.il/rss.php', category: 'israel' },
+  { name: 'kikar', url: 'https://www.kikar.co.il/rss.php', category: 'israel' },
+  { name: 'mynet', url: 'https://www.mynet.co.il/rss/index.xml', category: 'israel' },
+  { name: 'bhol', url: 'https://www.bhol.co.il/rss.php', category: 'israel' },
+  { name: 'behadrei', url: 'https://www.behadrei.co.il/rss.php', category: 'israel' },
+  { name: 'kupat', url: 'https://www.kupat.co.il/rss.php', category: 'israel' },
+  { name: 'rotter', url: 'https://www.rotter.net/rss/rotterscoops.xml', category: 'israel' },
+  { name: 'news1', url: 'https://www.news1.co.il/rss.php', category: 'israel' },
+  { name: 'megafon', url: 'https://www.megafon-news.co.il/rss.php', category: 'israel' },
+  { name: 'hazofe', url: 'https://www.hazofe.co.il/rss.php', category: 'israel' },
+  { name: 'makor1', url: 'https://www.makor1.co.il/rss.php', category: 'israel' },
+  { name: 'omedia', url: 'https://www.omedia.co.il/rss.php', category: 'israel' },
+  { name: 'shofar', url: 'https://www.shofar.tv/rss.php', category: 'israel' },
+  { name: 'haiad', url: 'https://www.haiad.co.il/rss.php', category: 'israel' },
+  { name: 'panet', url: 'https://www.panet.co.il/rss.php', category: 'israel' },
+  { name: 'shas', url: 'https://www.shas.org.il/rss.php', category: 'israel' },
+  { name: 'zangev', url: 'https://www.zangev.co.il/rss.php', category: 'israel' },
+  { name: 'kolha', url: 'https://www.kolha.co.il/rss.php', category: 'israel' },
+  { name: 'dimona', url: 'https://www.dimona.co.il/rss.php', category: 'israel' },
+  { name: 'ashdod', url: 'https://www.ashdod.net/rss.php', category: 'israel' },
+  
+  // מקורות חדשות מזרח תיכון
+  { name: 'arutz20', url: 'https://www.arutz20.co.il/rss.php', category: 'israel' },
+  { name: 'now14', url: 'https://www.now14.co.il/rss.php', category: 'israel' },
+  { name: 'channel13', url: 'https://13tv.co.il/rss/', category: 'israel' },
+  { name: 'channel11', url: 'https://kan.org.il/rss/', category: 'israel' },
+  { name: 'channel12', url: 'https://www.mako.co.il/rss/News', category: 'israel' },
+  
+  // מקורות אנגלית מזרח תיכון
+  { name: 'jns', url: 'https://www.jns.org/rss/', category: 'israel' },
+  { name: 'jewishnews', url: 'https://jewishnews.co.uk/rss/', category: 'world' },
+  { name: 'israelnationalnews', url: 'https://www.israelnationalnews.com/rss/', category: 'israel' },
+  { name: 'debka', url: 'https://www.debka.com/rss/', category: 'military' },
+  { name: 'memri', url: 'https://www.memri.org/rss', category: 'world' },
+  { name: 'mehrnews', url: 'https://en.mehrnews.com/rss', category: 'regional' },
+  { name: 'tasnim', url: 'https://www.tasnimnews.com/en/rss', category: 'regional' },
+  { name: 'farsnews', url: 'https://en.farsnews.ir/rss', category: 'regional' },
+  { name: 'irna', url: 'https://en.irna.ir/rss', category: 'regional' },
+  { name: 'lebanon24', url: 'https://www.lebanon24.com/rss', category: 'regional' },
+  { name: 'naharnet', url: 'https://www.naharnet.com/rss', category: 'regional' },
+  { name: 'dailystar_lb', url: 'https://www.dailystar.com.lb/rss', category: 'regional' },
+  { name: 'syria_hr', url: 'https://www.syriahr.com/en/rss/', category: 'regional' },
+  { name: 'enabbaladi', url: 'https://www.enabbaladi.net/en/rss/', category: 'regional' },
+  { name: 'hawarnews', url: 'https://hawarnews.com/en/rss/', category: 'regional' },
+  { name: 'almasdarnews', url: 'https://www.almasdarnews.com/rss', category: 'military' },
+  { name: 'southfront', url: 'https://southfront.org/rss/', category: 'military' },
+  
+  // מקורות חדשות עולמיות צבאיות
+  { name: 'janes', url: 'https://www.janes.com/rss', category: 'military' },
+  { name: 'stratcom', url: 'https://www.stratcom.mil/rss/', category: 'military' },
+  { name: 'centcom', url: 'https://www.centcom.mil/rss/', category: 'military' },
+  { name: 'idf_blog', url: 'https://www.idf.il/en/rss/', category: 'military' },
+  { name: 'idf_twitter', url: 'https://nitter.net/IDF/rss', category: 'military' },
+  { name: 'mossad', url: 'https://www.mossad.gov.il/rss', category: 'military' },
+  { name: 'israel_mfa', url: 'https://www.gov.il/en/rss', category: 'israel' },
+  { name: 'shinbet', url: 'https://www.shabak.gov.il/rss', category: 'israel' },
+];
+
+// Add to static sources
+ADDITIONAL_NEWS_SOURCES.forEach(source => {
+  if (!STATIC_NEWS_SOURCES.find(s => s.name === source.name)) {
+    STATIC_NEWS_SOURCES.push(source);
+  }
+});
